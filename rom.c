@@ -16,7 +16,7 @@ static void attempt_to_read(struct region *r) {
 
   data = (uint32_t *)(r->data);
 
-  if(asprintf(&fname, "ram_%08x.img",r->base) < 1) {
+  if(asprintf(&fname, "rom_%08x.img",r->base) < 1) {
     display_log("Unable to print file name to memory region");
     return;
   }
