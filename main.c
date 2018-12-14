@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
   }
   display_log("RISC-V initalised");
   riscv_reset();
+  display_log("Press SPACE to run a sigle instruction, or 'r' to run. 'q' to quit");
 
   while(!quit) {
     if(run) {
