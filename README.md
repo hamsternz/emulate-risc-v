@@ -15,13 +15,10 @@ can be created by running objcopy on RISC-V ELF executable.
 
 The interface uses ncurses, and currently has the following commands:
 
-    r    Toggle the CPU running flag
-    
-    R    Reset the CPU
-    
-  SPACE  Single step
-  
-    q    Quit
+        r    Toggle the CPU running flag
+        R    Reset the CPU
+      SPACE  Single step  
+        q    Quit
     
 Your terminal has to have colour support, and if you use WIndows Subsystem for 
 Linux make sure that your terminal type is set to "ansi.sys", as the WSL 
