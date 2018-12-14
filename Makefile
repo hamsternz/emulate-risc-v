@@ -33,3 +33,6 @@ clint.o : clint.c clint.h region.h display.h riscv.h
 
 uart.o : uart.c uart.h region.h display.h
 	gcc -c uart.c $(COPTS)
+
+clean:
+	rm -f *.o main
