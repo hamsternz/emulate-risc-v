@@ -22,3 +22,7 @@ The interface uses ncurses, and currently has the following commands:
 Your terminal has to have colour support, and if you use WIndows Subsystem for 
 Linux make sure that your terminal type is set to "ansi.sys", as the WSL 
 Terminfo database has a bug in it.
+
+Building:
+=========
+Just run 'make'. To run, type "./main"
