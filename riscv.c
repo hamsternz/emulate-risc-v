@@ -6,6 +6,7 @@
 #include "display.h"
 #include "string.h"
 
+#define CSR_MCYCLE     (0xB00)
 #define CSR_RDCYCLE    (0xC00)
 #define CSR_RDTIME     (0xC01)
 #define CSR_RDINSTRET  (0xC02) 
@@ -203,7 +204,11 @@ static void decode(uint32_t instr) {
 
 /****************************************************************************/
 static void exception( char *reason) {
-  display_log("EXCEPTION OCCURED");
+  char buffer[200];
+  if(strlen(reason) < 100)
+    sprintf(buffer, "EXCEPTION: %s : instruction 0x%08x", reason, current_instr);
+  else
+    sprintf(buffer, "EXCEPTION: [reason too long] : instruction 0x%08x", current_instr);
   display_log(reason);
 }	
 
@@ -259,7 +264,7 @@ int riscv_initialise(void) {
 }
 
 /****************************************************************************/
-static int op_unknown(void) {
+static int op_unknown(void) {           trace("???? (%08x)", current_instr,0,0);
   exception("Unknown Opcode exception");
   return 0;
 }
@@ -629,6 +634,10 @@ static int op_lhu(void) {        trace("LHU   r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_csrrw(void) {     trace("CSRRW r%u, r%u, %i",  rd, rs1, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
+
   if(rs1 != 0) csr[csrid] = regs[rs1];
   pc += 4;
   return 1;
@@ -636,6 +645,9 @@ static int op_csrrw(void) {     trace("CSRRW r%u, r%u, %i",  rd, rs1, csrid);
 
 /****************************************************************************/
 static int op_csrrs(void) { trace("CSRRS r%u, r%u, %i",  rd, rs1, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
 
   if(rd != 0) regs[rd] = csr[csrid];
   if(rs1 != 0) csr[csrid] |= regs[rs1];
@@ -645,6 +657,9 @@ static int op_csrrs(void) { trace("CSRRS r%u, r%u, %i",  rd, rs1, csrid);
 
 /****************************************************************************/
 static int op_csrrc(void) { trace("CSRRC r%u, r%u, %i",  rd, rs1, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
 
   if(rd != 0) regs[rd] = csr[csrid];
   if(rs1 != 0) csr[csrid] &= ~regs[rs1];
@@ -654,6 +669,9 @@ static int op_csrrc(void) { trace("CSRRC r%u, r%u, %i",  rd, rs1, csrid);
 
 /****************************************************************************/
 static int op_csrrwi(void) { trace("CSRRWI r%u, r%u, %i",  rd, uimm, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
 
   if(rd != 0) regs[rd] = csr[csrid];
   csr[csrid] = uimm;
@@ -663,6 +681,9 @@ static int op_csrrwi(void) { trace("CSRRWI r%u, r%u, %i",  rd, uimm, csrid);
 
 /****************************************************************************/
 static int op_csrrsi(void) { trace("CSRRSI r%u, r%u, %i",  rd, uimm, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
 
   if(rd != 0) regs[rd] = csr[csrid];
   csr[csrid] |= uimm;
@@ -673,6 +694,9 @@ static int op_csrrsi(void) { trace("CSRRSI r%u, r%u, %i",  rd, uimm, csrid);
 
 /****************************************************************************/
 static int op_csrrci(void) { trace("CSRRCI r%u, r%u, %i",  rd, uimm, csrid);
+  char buffer[100];
+  sprintf(buffer,"CSR 0x%03x accessed",csrid);
+  display_log(buffer);
 
   if(rd != 0) regs[rd] = csr[csrid];
   csr[csrid] &= ~uimm;
@@ -737,6 +761,16 @@ static int do_op(void) {
 }
 
 /****************************************************************************/
+uint32_t riscv_cycle_count_l(void) {
+  return csr[CSR_RDCYCLE];
+}
+
+/****************************************************************************/
+uint32_t riscv_cycle_count_h(void) {
+  return csr[CSR_RDCYCLEH];
+}
+
+/****************************************************************************/
 int riscv_run(void) {
   ///////////////////////////////////////
   // Update counters 
@@ -744,6 +778,7 @@ int riscv_run(void) {
   csr[CSR_RDCYCLE]++;
   if(csr[CSR_RDCYCLE] == 0)
     csr[CSR_RDCYCLEH]++;
+  csr[CSR_MCYCLE] = csr[CSR_RDCYCLE];
 
   csr[CSR_RDTIME]++;
   if(csr[CSR_RDTIME] == 0)

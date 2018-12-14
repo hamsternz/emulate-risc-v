@@ -7,11 +7,11 @@
 #include "display.h"
 
 /****************************************************************************/
-int PRCI_init(struct region *r) {
+int SPI_init(struct region *r) {
   uint32_t *data;
 
   if(r->data != NULL) {
-    display_log("PRCI already initialized");
+    display_log("SPI already initialized");
     return 0;
   }
  
@@ -21,12 +21,12 @@ int PRCI_init(struct region *r) {
   }
   r->data = (void *)data;
   memset(r->data, 0, r->size);
-  display_log("Set up PRCI region");
+  display_log("Set up SPI region");
   return 1;
 }
 
 /****************************************************************************/
-int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
+int SPI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    char buffer[100];
    if(address+4 > r->size) {
      fprintf(stderr,"Memory region boundary crossed at 0x%08x\n", r->base+address);
@@ -36,7 +36,7 @@ int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    if((address & 3) != 0) {
      fprintf(stderr,"Unaligned memory write 0x%08x\n", r->base+address);
    }
-   sprintf(buffer,"PRCI Wr address 0x%08x: 0x%08x", address, value);
+   sprintf(buffer,"SPI Wr address 0x%08x: 0x%08x", address, value);
    display_log(buffer);
 
    if(mask & 1) {
@@ -55,7 +55,7 @@ int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 }
 
 /****************************************************************************/
-int PRCI_get(struct region *r, uint32_t address, uint32_t *value) {
+int SPI_get(struct region *r, uint32_t address, uint32_t *value) {
    uint32_t v = 0;
    char buffer[100];
    if((address & 3) != 0) {
@@ -73,27 +73,21 @@ int PRCI_get(struct region *r, uint32_t address, uint32_t *value) {
    v = v + (((unsigned char *)r->data)[address+2] << 16); 
    v = v + (((unsigned char *)r->data)[address+3] << 24); 
 
-   switch(address) {
-     case 0:
-       v |= 1<<31; // HF Lock flag
-       break;
-     case 8:
-       v |= 1<<31; // PLL Lock flag
-       break;
-   }
+   if(address == 0)
+     v |= 1<<31;
    *value = v;
      
-   sprintf(buffer,"PRCI Rd address 0x%08x: 0x%08x", address, v);
+   sprintf(buffer,"SPI Rd address 0x%08x: 0x%08x", address, v);
    display_log(buffer);
 
    return 1;
 }
 
 /****************************************************************************/
-void PRCI_dump(struct region *r) {
+void SPI_dump(struct region *r) {
    int i;
 
-   printf("PRCI 0x%08x length 0x%08x\n", r->base, r->size);
+   printf("SPI 0x%08x length 0x%08x\n", r->base, r->size);
    for(i = 0; i < r->size && i < 4096; i++) {
       if(i%32 == 0) {
 	 printf("%08x:", r->base+i);
@@ -106,9 +100,9 @@ void PRCI_dump(struct region *r) {
      printf("\n");
 }
 /****************************************************************************/
-void PRCI_free(struct region *r) {
+void SPI_free(struct region *r) {
    char buffer[100];
-   sprintf(buffer, "Releasing PRCI at 0x%08x", r->base);
+   sprintf(buffer, "Releasing SPI at 0x%08x", r->base);
    display_log(buffer);
    if(r->data != NULL) 
      free(r->data);

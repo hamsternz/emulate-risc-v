@@ -4,14 +4,15 @@
 #include <memory.h>
 #include "region.h"
 #include "ram.h"
+#include "riscv.h"
 #include "display.h"
 
 /****************************************************************************/
-int PRCI_init(struct region *r) {
+int CLINT_init(struct region *r) {
   uint32_t *data;
 
   if(r->data != NULL) {
-    display_log("PRCI already initialized");
+    display_log("CLINT already initialized");
     return 0;
   }
  
@@ -21,12 +22,12 @@ int PRCI_init(struct region *r) {
   }
   r->data = (void *)data;
   memset(r->data, 0, r->size);
-  display_log("Set up PRCI region");
+  display_log("Set up CLINT region");
   return 1;
 }
 
 /****************************************************************************/
-int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
+int CLINT_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    char buffer[100];
    if(address+4 > r->size) {
      fprintf(stderr,"Memory region boundary crossed at 0x%08x\n", r->base+address);
@@ -36,7 +37,7 @@ int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    if((address & 3) != 0) {
      fprintf(stderr,"Unaligned memory write 0x%08x\n", r->base+address);
    }
-   sprintf(buffer,"PRCI Wr address 0x%08x: 0x%08x", address, value);
+   sprintf(buffer,"CLINT Wr address 0x%08x: 0x%08x", address, value);
    display_log(buffer);
 
    if(mask & 1) {
@@ -55,7 +56,7 @@ int PRCI_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 }
 
 /****************************************************************************/
-int PRCI_get(struct region *r, uint32_t address, uint32_t *value) {
+int CLINT_get(struct region *r, uint32_t address, uint32_t *value) {
    uint32_t v = 0;
    char buffer[100];
    if((address & 3) != 0) {
@@ -74,26 +75,39 @@ int PRCI_get(struct region *r, uint32_t address, uint32_t *value) {
    v = v + (((unsigned char *)r->data)[address+3] << 24); 
 
    switch(address) {
-     case 0:
-       v |= 1<<31; // HF Lock flag
-       break;
-     case 8:
-       v |= 1<<31; // PLL Lock flag
-       break;
+     case 0x0000:
+        *value = v;
+	break;
+     case 0x4000:
+        *value = v;
+	break;
+     case 0x4004:
+        *value = v;
+	break;
+     case 0xBFF8:
+        *value = riscv_cycle_count_l();
+	break;
+     case 0xBFFC:
+        *value = riscv_cycle_count_h();
+	break;
+     default:
+        sprintf(buffer,"CLINT Rd of non-register address 0x%08x", address);
+        display_log(buffer);
+	*value = 0;
+	return 1;
    }
-   *value = v;
      
-   sprintf(buffer,"PRCI Rd address 0x%08x: 0x%08x", address, v);
+   sprintf(buffer,"CLINT Rd address 0x%08x: 0x%08x", address, v);
    display_log(buffer);
 
    return 1;
 }
 
 /****************************************************************************/
-void PRCI_dump(struct region *r) {
+void CLINT_dump(struct region *r) {
    int i;
 
-   printf("PRCI 0x%08x length 0x%08x\n", r->base, r->size);
+   printf("CLINT 0x%08x length 0x%08x\n", r->base, r->size);
    for(i = 0; i < r->size && i < 4096; i++) {
       if(i%32 == 0) {
 	 printf("%08x:", r->base+i);
@@ -106,9 +120,9 @@ void PRCI_dump(struct region *r) {
      printf("\n");
 }
 /****************************************************************************/
-void PRCI_free(struct region *r) {
+void CLINT_free(struct region *r) {
    char buffer[100];
-   sprintf(buffer, "Releasing PRCI at 0x%08x", r->base);
+   sprintf(buffer, "Releasing CLINT at 0x%08x", r->base);
    display_log(buffer);
    if(r->data != NULL) 
      free(r->data);

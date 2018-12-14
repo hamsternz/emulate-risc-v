@@ -6,6 +6,8 @@
 #include "rom.h"
 #include "prci.h"
 #include "uart.h"
+#include "spi.h"
+#include "clint.h"
 #include "display.h"
 
 struct region *first_region = NULL;
@@ -127,9 +129,14 @@ int memorymap_initialise(char *image) {
     display_log("Unable to add regions");
     return 0;
   }
+  // PRCI
+  if(!add_region(0x10014000, 0x0080, SPI_init, SPI_get, SPI_set, SPI_free, SPI_dump)) {
+    display_log("Unable to add regions");
+    return 0;
+  }
   
 
-  if(!add_region(0x100, 0x4, UART_init, UART_get, UART_set, UART_free, UART_dump)) {
+  if(!add_region(0x02000000, 0x10000, CLINT_init, CLINT_get, CLINT_set, CLINT_free, CLINT_dump)) {
     display_log("Unable to add regions");
     return 0;
   }
