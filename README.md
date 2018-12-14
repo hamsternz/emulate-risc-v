@@ -10,7 +10,7 @@ programs binaries with GCC's RISC-V
 
 You can see how the memory map is layed out in memorymap.c. When a ROM or RAM 
 memory region is added to the memory map it attempts to load the contents from
-a file called "ram_[start_address_in_hex].img" (e.g. "ram_20400000.img"). These
+a file called "rom_[start_address_in_hex].img" (e.g. "rom_20400000.img"). These
 can be created by running objcopy on RISC-V ELF executable.
 
 The interface uses ncurses, and currently has the following commands:
