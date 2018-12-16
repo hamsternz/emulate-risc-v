@@ -1,8 +1,8 @@
 COPTS=-Wall -pedantic -O3 -g
 LOPTS=-lncurses
 
-main : main.o memorymap.o ram.o uart.o riscv.o display.o prci.o rom.o spi.o clint.o
-	gcc -o main main.o riscv.o memorymap.o ram.o uart.o display.o prci.o rom.o spi.o clint.o $(LOPTS) 
+main : main.o memorymap.o ram.o uart.o riscv.o display.o prci.o rom.o spi.o clint.o gpio.o
+	gcc -o main main.o riscv.o memorymap.o ram.o uart.o display.o prci.o rom.o spi.o clint.o gpio.o $(LOPTS) 
 
 main.o : main.c memorymap.h display.h riscv.h
 	gcc -c main.c $(COPTS)
@@ -10,7 +10,7 @@ main.o : main.c memorymap.h display.h riscv.h
 riscv.o : riscv.c riscv.h memorymap.h
 	gcc -c riscv.c $(COPTS)
 
-memorymap.o : memorymap.c memorymap.h region.h ram.h uart.h prci.h rom.h spi.h clint.h display.h
+memorymap.o : memorymap.c memorymap.h region.h ram.h uart.h prci.h rom.h spi.h clint.h gpio.h display.h
 	gcc -c memorymap.c $(COPTS)
 
 display.o : display.c display.h riscv.h
@@ -28,6 +28,9 @@ spi.o : spi.c spi.h region.h display.h
 prci.o : prci.c prci.h region.h display.h
 	gcc -c prci.c $(COPTS)
 
+gpio.o : gpio.c prci.h region.h display.h
+	gcc -c gpio.c $(COPTS)
+
 clint.o : clint.c clint.h region.h display.h riscv.h
 	gcc -c clint.c $(COPTS)
 
@@ -35,4 +38,4 @@ uart.o : uart.c uart.h region.h display.h
 	gcc -c uart.c $(COPTS)
 
 clean:
-	rm -f *.o main
+	rm -f *.o main events.log

@@ -16,6 +16,10 @@
 #define TRACE_SHOW 17
 #define TRACE_WIDTH 52
 
+#define N_UART      3
+#define UART_SHOW   3
+#define UART_WIDTH 80
+FILE *log_file;
 
 static char *log_lines[N_LOG];
 static int log_index = 0;
@@ -25,8 +29,14 @@ static char *trace_lines[N_TRACE];
 static int trace_index = 0;
 static int trace_changed = 1;
 
+static char *uart_lines[N_TRACE];
+static int uart_index = 0;
+static int uart_changed = 1;
+static int uart_cursor_x = 0;
+static int uart_cursor_y = 0;
+
 /*****************************************************************/
-void update_reg(void) {
+static void update_reg(void) {
   int i;
   move(0, 0);
   attron(COLOR_PAIR(BORDER_PAIR));
@@ -42,7 +52,7 @@ void update_reg(void) {
 }
 
 /*****************************************************************/
-void update_log(void) {
+static void update_log(void) {
   int i, index;
 
   index = log_index-LOG_SHOW;
@@ -62,7 +72,7 @@ void update_log(void) {
   log_changed = 0;
 }
 /*****************************************************************/
-void update_trace(void) {
+static void update_trace(void) {
   int i, index;
 
   move(0, 28);
@@ -81,8 +91,31 @@ void update_trace(void) {
   trace_changed = 0;
 }
 /*****************************************************************/
+static void update_uart(void) {
+  int i, index;
+
+  move(27, 0);
+  attron(COLOR_PAIR(BORDER_PAIR));
+  printw("UART data:");
+  clrtoeol();
+  index = uart_index-UART_SHOW;
+  if(index < 0) index = 0;
+
+  attron(COLOR_PAIR(ACTIVE_PAIR));
+  for(i = 0; i < UART_SHOW; i++) {
+     move(28+i,0);
+     if(uart_lines[index+i])
+       printw("%s", uart_lines[index+i]);
+  }
+  uart_changed = 0;
+}
+
+/*****************************************************************/
 int display_start(void) {
   int i, maxx, maxy;
+  if(log_file == NULL) {
+    log_file = fopen("events.log","wb");
+  }
   for(i = 0; i < N_TRACE; i++) {
     trace_lines[i] = malloc(TRACE_WIDTH+1);
     if(trace_lines[i] == NULL) {
@@ -93,6 +126,16 @@ int display_start(void) {
     trace_lines[i][TRACE_WIDTH] = 0;
   }
 
+  for(i = 0; i < N_UART; i++) {
+    uart_lines[i] = malloc(UART_WIDTH+1);
+    if(uart_lines[i] == NULL) {
+      fprintf(stderr, "Unable to allocate uart lines\n");
+      return 0;
+    }
+    memset(uart_lines[i], ' ', UART_WIDTH);
+    uart_lines[i][UART_WIDTH] = 0;
+  }
+
   /* This sets up the screen */
   if(initscr()==NULL) {
     return 0;
@@ -101,13 +144,15 @@ int display_start(void) {
   if(!has_colors()) {
     endwin();
     fprintf(stderr,"Terminal must support colour\n");
+    return 0;
   }
-  maxx = getmaxx(stdscr);
-  maxy = getmaxy(stdscr);
 
-  if((maxx < 80) || (maxy < 25)) {
+  getmaxyx(stdscr, maxy, maxx);
+  if(maxx < 80 || maxy < 30)
+  {
     endwin();
-    fprintf(stderr,"Terminal must be at least 80x24\n");
+    fprintf(stderr,"Terminal must be at least 80x30 - currently %i x %i\n", maxx, maxy);
+    return 0;
   }
 
   start_color();
@@ -132,14 +177,20 @@ void display_update(void) {
   if(log_changed) 
     update_log();
 
-//  if(trace_changed) 
+  if(trace_changed) 
     update_trace();
+ 
+  if(uart_changed) 
+    update_uart();
  
   refresh();
 }
 
 /*****************************************************************/
 void display_log(char *str) {
+  if(log_file != NULL) {
+    fprintf(log_file,"%s\n",str);
+  }
   if(log_index == N_LOG) {
     ////////////////////
     // Free up a line 
@@ -219,8 +270,46 @@ void display_process_input(int *run, int *quit, int *trace, int *reset) {
   }
 }
 /*****************************************************************/
+void display_uart_write(char c) {
+
+  /* Only display printable characters */
+  if(c > 27 && c < 127) {
+    uart_lines[uart_cursor_y][uart_cursor_x] = c;
+    uart_cursor_x++;
+  }
+
+  /* Caridge return brings the cursor to the left */
+  if(c == '\r') {
+    uart_cursor_x = 0;
+  }
+
+  /* Do we need to move to the next line? */
+  if(c == '\n' || uart_cursor_x == UART_WIDTH) {
+    uart_cursor_y++;
+    uart_cursor_x = 0;
+    /* Have we run out of lines */
+    if(uart_cursor_y == N_UART) {
+      /* shuffle the lines up, moving the first line to the end */
+      int i;
+      char *t = uart_lines[0];
+      for(i = 1; i < N_UART; i++) {
+	uart_lines[i-1] = uart_lines[i];
+      }
+      uart_lines[N_UART-1] = t;
+
+      /* Empty out the first line */
+      memset(uart_lines[N_UART-1],' ', UART_WIDTH);
+    }
+  }
+  uart_changed = 1;
+}
+/*****************************************************************/
 void display_end(void) {
   int i;
+  if(log_file != NULL) {
+    fclose(log_file);
+    log_file = NULL;
+  }
   for(i = 0; i < N_TRACE; i++) {
     if(trace_lines[i] != NULL)
       free(trace_lines[i]);

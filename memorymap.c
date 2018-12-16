@@ -5,6 +5,7 @@
 #include "ram.h"
 #include "rom.h"
 #include "prci.h"
+#include "gpio.h"
 #include "uart.h"
 #include "spi.h"
 #include "clint.h"
@@ -125,11 +126,24 @@ int memorymap_initialise(char *image) {
   }
 
   // PRCI
-  if(!add_region(0x10008000, 0x0010, PRCI_init, PRCI_get, PRCI_set, PRCI_free, PRCI_dump)) {
+  if(!add_region(0x10008000, 0x0FFF, PRCI_init, PRCI_get, PRCI_set, PRCI_free, PRCI_dump)) {
     display_log("Unable to add regions");
     return 0;
   }
-  // PRCI
+
+  // GPIO 
+  if(!add_region(0x10012000, 0x0FFF, GPIO_init, GPIO_get, GPIO_set, GPIO_free, GPIO_dump)) {
+    display_log("Unable to add regions");
+    return 0;
+  }
+  
+  // UART 
+  if(!add_region(0x10013000, 0x0FFF, UART_init, UART_get, UART_set, UART_free, UART_dump)) {
+    display_log("Unable to add regions");
+    return 0;
+  }
+  
+  // SPI  
   if(!add_region(0x10014000, 0x0080, SPI_init, SPI_get, SPI_set, SPI_free, SPI_dump)) {
     display_log("Unable to add regions");
     return 0;

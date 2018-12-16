@@ -10,6 +10,7 @@ int main(int argc, char *argv[]) {
 
   if(!display_start()) {
     fprintf(stderr,"Unable to initialise display\n");
+    return 0;
   }
   if(!memorymap_initialise(NULL)) {
     return 0;

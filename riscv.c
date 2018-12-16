@@ -6,6 +6,8 @@
 #include "display.h"
 #include "string.h"
 
+#define ALLOW_RV32M 1
+
 #define CSR_MCYCLE     (0xB00)
 #define CSR_RDCYCLE    (0xC00)
 #define CSR_RDTIME     (0xC01)
@@ -77,6 +79,17 @@ static int op_csrrs(void);
 static int op_csrrc(void);
 static int op_csrrw(void);
 
+#ifdef ALLOW_RV32M
+static int op_mul(void);
+static int op_mulh(void);
+static int op_mulhsu(void);
+static int op_mulhu(void);
+static int op_div(void);
+static int op_divu(void);
+static int op_rem(void);
+static int op_remu(void);
+#endif 
+
 static int op_unknown(void);
 
 struct opcode_entry { 
@@ -141,7 +154,17 @@ struct opcode_entry {
    {"-----------------101-----1110011", op_csrrwi},
    {"-----------------110-----1110011", op_csrrsi},
    {"-----------------111-----1110011", op_csrrci},
-
+#ifdef ALLOW_RV32M
+   // RV32M instructions 
+   {"0000001----------000-----0110011", op_mul},     //TODO set pattern
+   {"0000001----------001-----0110011", op_mulh},    //TODO set pattern
+   {"0000001----------010-----0110011", op_mulhsu},  //TODO set pattern
+   {"0000001----------011-----0110011", op_mulhu},   //TODO set pattern
+   {"0000001----------100-----0110011", op_div},     //TODO set pattern
+   {"0000001----------101-----0110011", op_divu},    //TODO set pattern
+   {"0000001----------110-----0110011", op_rem},     //TODO set pattern
+   {"0000001----------111-----0110011", op_remu},    //TODO set pattern
+#endif
    {"--------------------------------", op_unknown}  // Catches all the others
 };
 
@@ -197,7 +220,7 @@ static void decode(uint32_t instr) {
 
   imm12wr   =  instr; /* Note - becomes signed */
   imm12wr  >>= 20;
-  imm12wr  &= 0xFFFE0;
+  imm12wr  &= 0xFFFFFFE0;
   imm12wr  |= (instr >> 7)  & 0x1f;
   current_instr = instr;
 }
@@ -443,6 +466,7 @@ static int op_xor(void) {          trace("XOR   r%u, r%u, r%u",  rd, rs1, rs2);
 
 /****************************************************************************/
 static int op_xori(void) {       trace("XORI  r%u, r%u, %i",  rd, rs1, imm12);
+  trace("XORI  r%u, r%u, %i",  rd, rs1, imm12);
 
   if(rd != 0) regs[rd] = regs[rs1] ^ imm12;    
 
@@ -735,6 +759,78 @@ static int op_sw(void) { trace("SW    r%u+%i, r%u", rs1 , imm12wr, rs2);
 }
 
 /****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_mul(void) {          trace("MUL   r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked MUL");
+  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO CHeck/fix
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_mulh(void) {         trace("MULH  r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked MULH");
+  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_mulhsu(void) {      trace("MULHUS r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked MULHSU");
+  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_mulhu(void) {        trace("MULHU r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked MULHU");
+  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_div(void) {          trace("DIV   r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked DIV");
+  if(rd != 0) regs[rd] = (int32_t)(regs[rs1]) / (int32_t)(regs[rs2]); //TODO Check/fix
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_divu(void) {         trace("DIVU  r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked DIVU");
+  if(rd != 0) regs[rd] = regs[rs1] / regs[rs2]; // TODO Check ordering
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_rem(void) {          trace("REM   r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked REM");
+  if(rd != 0) regs[rd] = regs[rs1] % regs[rs2];  // TODO Check ordering / sign
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
+#ifdef ALLOW_RV32M
+static int op_remu(void) {         trace("REMU  r%u, r%u, %i",  rd, rs1, rs2);
+  display_log("Unchecked REMU");
+  if(rd != 0) regs[rd] = regs[rs1] % regs[rs2];  // TODO Check ordering
+  pc += 4;
+  return 1;
+}
+#endif
+/****************************************************************************/
 static int do_op(void) {
   uint32_t instr;
   int i;
@@ -789,6 +885,10 @@ int riscv_run(void) {
     if(csr[CSR_RDTIME] == 0)
       csr[CSR_RDTIMEH]++;
     return 1;
+  } else {
+    char buffer[100];
+    sprintf(buffer,"Instruction : %08x",current_instr);
+    display_log(buffer);
   }
   return 0;
 }

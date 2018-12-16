@@ -7,11 +7,11 @@
 #include "display.h"
 
 /****************************************************************************/
-int UART_init(struct region *r) {
+int GPIO_init(struct region *r) {
   uint32_t *data;
 
   if(r->data != NULL) {
-    display_log("UART already initialized");
+    display_log("GPIO already initialized");
     return 0;
   }
  
@@ -21,12 +21,12 @@ int UART_init(struct region *r) {
   }
   r->data = (void *)data;
   memset(r->data, 0, r->size);
-  display_log("Set up UART region");
+  display_log("Set up GPIO region");
   return 1;
 }
 
 /****************************************************************************/
-int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
+int GPIO_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    char buffer[100];
    if(address+4 > r->size) {
      fprintf(stderr,"Memory region boundary crossed at 0x%08x\n", r->base+address);
@@ -36,15 +36,11 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    if((address & 3) != 0) {
      fprintf(stderr,"Unaligned memory write 0x%08x\n", r->base+address);
    }
-   sprintf(buffer,"UART Wr address 0x%08x: 0x%08x", address, value);
+   sprintf(buffer,"GPIO Wr address 0x%08x: 0x%08x", address, value);
    display_log(buffer);
-
 
    if(mask & 1) {
       ((unsigned char *)r->data)[address+0] = value; 
-      if(address == 0) {
-	display_uart_write(value & 0xFF);
-      }
    }
    if(mask & 2) {
       ((unsigned char *)r->data)[address+1] = value>>8; 
@@ -59,7 +55,7 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 }
 
 /****************************************************************************/
-int UART_get(struct region *r, uint32_t address, uint32_t *value) {
+int GPIO_get(struct region *r, uint32_t address, uint32_t *value) {
    uint32_t v = 0;
    char buffer[100];
    if((address & 3) != 0) {
@@ -115,17 +111,17 @@ int UART_get(struct region *r, uint32_t address, uint32_t *value) {
    }
    *value = v;
      
-   sprintf(buffer,"UART Rd address 0x%08x: 0x%08x", address, v);
+   sprintf(buffer,"GPIO Rd address 0x%08x: 0x%08x", address, v);
    display_log(buffer);
 
    return 1;
 }
 
 /****************************************************************************/
-void UART_dump(struct region *r) {
+void GPIO_dump(struct region *r) {
    int i;
 
-   printf("UART 0x%08x length 0x%08x\n", r->base, r->size);
+   printf("GPIO 0x%08x length 0x%08x\n", r->base, r->size);
    for(i = 0; i < r->size && i < 4096; i++) {
       if(i%32 == 0) {
 	 printf("%08x:", r->base+i);
@@ -138,9 +134,9 @@ void UART_dump(struct region *r) {
      printf("\n");
 }
 /****************************************************************************/
-void UART_free(struct region *r) {
+void GPIO_free(struct region *r) {
    char buffer[100];
-   sprintf(buffer, "Releasing UART at 0x%08x", r->base);
+   sprintf(buffer, "Releasing GPIO at 0x%08x", r->base);
    display_log(buffer);
    if(r->data != NULL) 
      free(r->data);

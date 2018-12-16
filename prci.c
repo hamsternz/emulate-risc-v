@@ -79,7 +79,7 @@ int PRCI_get(struct region *r, uint32_t address, uint32_t *value) {
        break;
      case 8:
        v |= 1<<31; // PLL Lock flag
-       break;
+       break;    
    }
    *value = v;
      
