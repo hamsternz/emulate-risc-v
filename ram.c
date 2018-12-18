@@ -1,3 +1,12 @@
+/********************************************************************
+ * Part of Mike Field's emulate-risc-v project.
+ *
+ * (c) 2018 Mike Field <hamster@snap.net.nz>
+ *
+** See https://github.com/hamsternz/emulate-risc-v for licensing
+ * and additional info
+ *
+ ********************************************************************/
 #define _GNU_SOURCE
 #include <malloc.h>
 #include <stdint.h>

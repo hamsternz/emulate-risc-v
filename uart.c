@@ -1,3 +1,12 @@
+/********************************************************************
+ * Part of Mike Field's emulate-risc-v project.
+ *
+ * (c) 2018 Mike Field <hamster@snap.net.nz>
+ *
+ * See https://github.com/hamsternz/emulate-risc-v for licensing
+ * and additional info
+ *
+ ********************************************************************/
 #define _GNU_SOURCE
 #include <malloc.h>
 #include <stdint.h>
@@ -9,20 +18,20 @@
 #define UART_DEBUG 0
 #define UART_QUEUE_DEPTH 8
 struct uart_data {
-  uint16_t divisor; // 0xFFFF
+  uint16_t divisor; 
   uint8_t tx_queue[UART_QUEUE_DEPTH];
   uint8_t rx_queue[UART_QUEUE_DEPTH];
-  uint8_t tx_count; // 0
-  uint8_t rx_count; // 0
-  uint8_t tx_watermark; // 0
-  uint8_t rx_watermark; // 0
-  uint8_t tx_enable; // 0
-  uint8_t rx_enable; // 0
-  uint8_t tx_irq_enable; // 0
-  uint8_t rx_irq_enable; // 0
-  uint8_t rx_irq_tx_pending; // 0
-  uint8_t rx_irq_rx_pending; // 0
-  uint8_t stop_bits; // 0
+  uint8_t tx_count;
+  uint8_t rx_count;
+  uint8_t tx_watermark;
+  uint8_t rx_watermark;
+  uint8_t tx_enable;
+  uint8_t rx_enable;
+  uint8_t tx_irq_enable;
+  uint8_t rx_irq_enable;
+  uint8_t rx_irq_tx_pending;
+  uint8_t rx_irq_rx_pending;
+  uint8_t stop_bits;
   uint8_t debug;
 };
 /****************************************************************************/
