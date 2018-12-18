@@ -761,8 +761,7 @@ static int op_sw(void) { trace("SW    r%u+%i, r%u", rs1 , imm12wr, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_mul(void) {          trace("MUL   r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked MUL");
-  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO CHeck/fix
+  if(rd != 0) regs[rd] = ((uint64_t)regs[rs1] * (uint64_t)regs[rs2]);
   pc += 4;
   return 1;
 }
@@ -770,8 +769,7 @@ static int op_mul(void) {          trace("MUL   r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_mulh(void) {         trace("MULH  r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked MULH");
-  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  if(rd != 0) regs[rd] = ((int64_t)regs[rs1] * (int64_t)regs[rs2]) >> 32;
   pc += 4;
   return 1;
 }
@@ -779,8 +777,7 @@ static int op_mulh(void) {         trace("MULH  r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_mulhsu(void) {      trace("MULHUS r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked MULHSU");
-  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  if(rd != 0) regs[rd] = ((int64_t)regs[rs1] * (uint64_t)regs[rs2]) >> 32;
   pc += 4;
   return 1;
 }
@@ -788,8 +785,7 @@ static int op_mulhsu(void) {      trace("MULHUS r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_mulhu(void) {        trace("MULHU r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked MULHU");
-  if(rd != 0) regs[rd] = regs[rs1] * regs[rs2]; //TODO Check/fix
+  if(rd != 0) regs[rd] = ((uint64_t)regs[rs1] * (uint64_t)regs[rs2]) >> 32;
   pc += 4;
   return 1;
 }
@@ -797,8 +793,12 @@ static int op_mulhu(void) {        trace("MULHU r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_div(void) {          trace("DIV   r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked DIV");
-  if(rd != 0) regs[rd] = (int32_t)(regs[rs1]) / (int32_t)(regs[rs2]); //TODO Check/fix
+  if(rd != 0) {
+    if(regs[rs2] == 0)
+      regs[rd] = 0xFFFFFFFF;
+    else
+      regs[rd] = (int32_t)regs[rs1] / (int32_t)regs[rs2];
+  }
   pc += 4;
   return 1;
 }
@@ -806,8 +806,12 @@ static int op_div(void) {          trace("DIV   r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_divu(void) {         trace("DIVU  r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked DIVU");
-  if(rd != 0) regs[rd] = regs[rs1] / regs[rs2]; // TODO Check ordering
+  if(rd != 0) {
+    if(regs[rs2] == 0)
+      regs[rd] = 0xFFFFFFFF;
+    else
+      regs[rd] = (uint32_t)regs[rs1] / (uint32_t)regs[rs2];
+  }
   pc += 4;
   return 1;
 }
@@ -815,8 +819,12 @@ static int op_divu(void) {         trace("DIVU  r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_rem(void) {          trace("REM   r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked REM");
-  if(rd != 0) regs[rd] = regs[rs1] % regs[rs2];  // TODO Check ordering / sign
+  if(rd != 0) {
+    if(regs[rs2] == 0)
+      regs[rd] = 0xFFFFFFFF;
+    else
+      regs[rd] = (int32_t)regs[rs1] % (int32_t)regs[rs2];
+  }
   pc += 4;
   return 1;
 }
@@ -824,8 +832,12 @@ static int op_rem(void) {          trace("REM   r%u, r%u, %i",  rd, rs1, rs2);
 /****************************************************************************/
 #ifdef ALLOW_RV32M
 static int op_remu(void) {         trace("REMU  r%u, r%u, %i",  rd, rs1, rs2);
-  display_log("Unchecked REMU");
-  if(rd != 0) regs[rd] = regs[rs1] % regs[rs2];  // TODO Check ordering
+  if(rd != 0) {
+    if(regs[rs2] == 0)
+      regs[rd] = 0xFFFFFFFF;
+    else
+      regs[rd] = (uint32_t)regs[rs1] % (uint32_t)regs[rs2];
+  }
   pc += 4;
   return 1;
 }
