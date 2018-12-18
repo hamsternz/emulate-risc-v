@@ -73,7 +73,7 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 	   }
          } else {
            if(data->debug) {
-             sprintf(buffer,"UART rx queue overflow adding 0x%02x", value & 0xff);
+             sprintf(buffer,"UART tx queue overflow adding 0x%02x", value & 0xff);
              display_log(buffer);
            }
 	 }
@@ -134,6 +134,31 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    return 1;
 }
 
+/****************************************************************************/
+void UART_rx_enqueue(struct region *r, uint8_t c) {
+  char buffer[100];
+  struct uart_data *data = r->data;
+  if(data->rx_enable) {
+    if(data->rx_count < UART_QUEUE_DEPTH) {
+      data->rx_queue[data->tx_count] = c;
+      data->rx_count++;
+      if(data->debug) {
+        sprintf(buffer,"UART data added to rx queue 0x%02x", c);
+        display_log(buffer);
+      }
+    } else {
+      if(data->debug) {
+        sprintf(buffer,"UART rx queue overflow adding 0x%02x", c);
+        display_log(buffer);
+      }
+    }
+  } else {
+    if(data->debug) {
+      sprintf(buffer,"UART rx disabled while adding 0x%02x", c);
+      display_log(buffer);
+    }
+  }
+}
 /****************************************************************************/
 int UART_get(struct region *r, uint32_t address, uint32_t *value) {
    uint32_t v = 0;
@@ -240,19 +265,7 @@ int UART_get(struct region *r, uint32_t address, uint32_t *value) {
 
 /****************************************************************************/
 void UART_dump(struct region *r) {
-   int i;
-
    printf("UART 0x%08x length 0x%08x\n", r->base, r->size);
-   for(i = 0; i < r->size && i < 4096; i++) {
-      if(i%32 == 0) {
-	 printf("%08x:", r->base+i);
-      }
-      printf(" %02x", ((unsigned char *)(r->data))[i]);
-      if(i%32 == 31)
-	 printf("\n");
-   }
-   if(i%32 != 0)
-     printf("\n");
 }
 /****************************************************************************/
 void UART_free(struct region *r) {
