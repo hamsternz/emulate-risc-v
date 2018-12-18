@@ -6,21 +6,44 @@
 #include "ram.h"
 #include "display.h"
 
+#define UART_DEBUG 0
+#define UART_QUEUE_DEPTH 8
+struct uart_data {
+  uint16_t divisor; // 0xFFFF
+  uint8_t tx_queue[UART_QUEUE_DEPTH];
+  uint8_t rx_queue[UART_QUEUE_DEPTH];
+  uint8_t tx_count; // 0
+  uint8_t rx_count; // 0
+  uint8_t tx_watermark; // 0
+  uint8_t rx_watermark; // 0
+  uint8_t tx_enable; // 0
+  uint8_t rx_enable; // 0
+  uint8_t tx_irq_enable; // 0
+  uint8_t rx_irq_enable; // 0
+  uint8_t rx_irq_tx_pending; // 0
+  uint8_t rx_irq_rx_pending; // 0
+  uint8_t stop_bits; // 0
+  uint8_t debug;
+};
 /****************************************************************************/
 int UART_init(struct region *r) {
-  uint32_t *data;
+  struct uart_data *data;
 
   if(r->data != NULL) {
     display_log("UART already initialized");
     return 0;
   }
  
-  data = malloc(r->size);
+  data = malloc(sizeof(struct uart_data));
   if(data == NULL){
     return 0;
   }
+
+  memset(data, 0, sizeof(struct uart_data));
+  data->divisor = 0xffff;
+  data->debug   = UART_DEBUG;
   r->data = (void *)data;
-  memset(r->data, 0, r->size);
+
   display_log("Set up UART region");
   return 1;
 }
@@ -28,6 +51,7 @@ int UART_init(struct region *r) {
 /****************************************************************************/
 int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    char buffer[100];
+   struct uart_data *data = r->data;
    if(address+4 > r->size) {
      fprintf(stderr,"Memory region boundary crossed at 0x%08x\n", r->base+address);
      return 0;
@@ -36,24 +60,76 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
    if((address & 3) != 0) {
      fprintf(stderr,"Unaligned memory write 0x%08x\n", r->base+address);
    }
-   sprintf(buffer,"UART Wr address 0x%08x: 0x%08x", address, value);
-   display_log(buffer);
 
 
-   if(mask & 1) {
-      ((unsigned char *)r->data)[address+0] = value; 
-      if(address == 0) {
-	display_uart_write(value & 0xFF);
-      }
+   switch(address) {
+     case 0x00: // TRANSMIT DATA REGISTER
+	 if(data->tx_count < UART_QUEUE_DEPTH) {
+	   data->tx_queue[data->tx_count] = value & 0xFF;
+	   data->tx_count++;
+	   if(data->debug) {
+             sprintf(buffer,"UART data added to tx queue 0x%02x", value & 0xff);
+             display_log(buffer);
+	   }
+         } else {
+           if(data->debug) {
+             sprintf(buffer,"UART rx queue overflow adding 0x%02x", value & 0xff);
+             display_log(buffer);
+           }
+	 }
+	 break;    
+     case 0x04:
+	 break;
+     case 0x08:
+	 data->tx_enable    = (value  &  1) ? 1 : 0;
+	 data->stop_bits    = (value  &  2) ? 2 : 1;
+	 data->tx_watermark = (value >> 16) & 0x7;
+         if(data->debug) {
+           sprintf(buffer,"UART set tx_enable = %i, stop_bits = %i, tx_watermark = %i",
+		data->tx_enable, data->stop_bits, data->tx_watermark);
+           display_log(buffer);
+         }
+	 break;
+     case 0x0C:
+	 data->rx_enable    = (value  &  1) ? 1 : 0;
+	 data->rx_watermark = (value >> 16) & 0x7;
+         if(data->debug) {
+           sprintf(buffer,"UART set rx_enable = %i, rx_watermark = %i",
+		data->rx_enable, data->rx_watermark);
+           display_log(buffer);
+         }
+	 break;
+     case 0x10:
+	 data->rx_irq_enable = (value  &  1) ? 1 : 0;
+	 data->tx_irq_enable = (value  &  2) ? 1 : 0;
+         if(data->debug) {
+           sprintf(buffer,"UART set rx_irq_enable = %i, tx_irq_enable = %i",
+                 data->rx_irq_enable, data->tx_irq_enable);
+           display_log(buffer);
+         }
+	 break;
+     case 0x14:
+	 break;
+     case 0x18:
+	 data->divisor = value & 0xFFFF;
+	 if(data->debug) {
+           sprintf(buffer,"UART Divisor set to 0x%08x", value);
+           display_log(buffer);
+	 }
+	 break;
+     default:
+         sprintf(buffer,"UART Wr unkown address 0x%08x: 0x%08x", address, value);
+         display_log(buffer);
+	 break;
    }
-   if(mask & 2) {
-      ((unsigned char *)r->data)[address+1] = value>>8; 
-   }
-   if(mask & 4) {
-      ((unsigned char *)r->data)[address+2] = value>>16; 
-   }
-   if(mask & 8) {
-      ((unsigned char *)r->data)[address+3] = value>>24; 
+
+   // SHould I flush the queue? 
+   if(data->tx_enable) {
+     int i;
+     for(i = 0; i< data->tx_count; i++) {
+       display_uart_write(data->tx_queue[i] & 0xFF);
+     }
+     data->tx_count = 0;
    }
    return 1;
 }
@@ -62,6 +138,8 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 int UART_get(struct region *r, uint32_t address, uint32_t *value) {
    uint32_t v = 0;
    char buffer[100];
+   struct uart_data *data = r->data;
+
    if((address & 3) != 0) {
      fprintf(stderr,"Unaligned memory read 0x%08x\n", r->base+address);
      return 0;
@@ -72,51 +150,90 @@ int UART_get(struct region *r, uint32_t address, uint32_t *value) {
      return 0;
    }
 
-   v = ((unsigned char *)r->data)[address]; 
-   v = v + (((unsigned char *)r->data)[address+1] << 8); 
-   v = v + (((unsigned char *)r->data)[address+2] << 16); 
-   v = v + (((unsigned char *)r->data)[address+3] << 24); 
+   v = 0;
 
    switch(address) {
      case 0x00:
+       v = (data->tx_count == UART_QUEUE_DEPTH) ? (1<<31) : 0;
+       if(data->debug) {
+         sprintf(buffer,"UART is %s to accept tx data",
+           data->tx_count == UART_QUEUE_DEPTH ? "not ready" : "ready");
+         display_log(buffer);
+       }
        break;
      case 0x04:
+       if(data->rx_count > 0) {
+         if(data->debug) {
+	   int i;
+	   v = data->rx_queue[0];
+	   for(i = 1; i < data->rx_count; i++) {
+	     data->rx_queue[i-1] = data->rx_queue[i];
+	   }
+	   data->rx_count--;
+           sprintf(buffer,"UART rx queue read - 0x%03x", v);
+	   display_log(buffer);
+         }
+       } else {
+         v = (1<<31);
+         if(data->debug) {
+           display_log("UART rx queue is empty");
+         }
+       }
        break;
      case 0x08:
+       v = 0;
+       v |= data->tx_enable      ? 1 : 0;
+       v |= data->stop_bits == 2 ? 2 : 0;
+       v |= (data->tx_watermark << 16);
+       if(data->debug) {
+         sprintf(buffer,"UART get tx_enable = %i, stop_bits = %i, tx_watermark = %i",
+           data->tx_enable, data->stop_bits, data->tx_watermark);
+         display_log(buffer);
+       }
        break;
      case 0x0C:
+       v = 0;
+       v |= data->rx_enable      ? 1 : 0;
+       v |= (data->tx_watermark << 16);
+       if(data->debug) {
+         sprintf(buffer,"UART get rx_enable = %i, rx_watermark = %i",
+           data->rx_enable, data->rx_watermark);
+         display_log(buffer);
+       }
        break;
      case 0x10:
+       v = 0;
+       v |= data->rx_irq_enable ? 1 : 0;
+       v |= data->tx_irq_enable ? 2 : 0;
+       if(data->debug) {
+         sprintf(buffer,"UART get rx_irq_enable = %i, tx_irq_enable = %i",
+                 data->rx_irq_enable, data->tx_irq_enable);
+         display_log(buffer);
+       }
        break;
      case 0x14:
+       v = 0;
+       v |= data->tx_count > data->tx_watermark ? 1 : 0;
+       v |= data->rx_count > data->rx_watermark ? 2 : 0;
+       if(data->debug) {
+         sprintf(buffer,"UART get rx_irq_pending = %i, tx_irq_pending = %i",
+                 v&1, v>>1);
+         display_log(buffer);
+       }
        break;
      case 0x18:
+       v = data->divisor;
+       if(data->debug) {
+         sprintf(buffer,"UART get divisor = 0x%08x", v);
+         display_log(buffer);
+       }
        break;
-     case 0x1C:
-       break;
-     case 0x20:
-       break;
-     case 0x24:
-       break;
-     case 0x28:
-       break;
-     case 0x2C:
-       break;
-     case 0x30:
-       break;
-     case 0x34:
-       break;
-     case 0x38:
-       break;
-     case 0x3C:
-       break;
-     case 0x40:
+     default:
+       sprintf(buffer,"UART Wr unkown address 0x%08x: 0x%08x", address, v);
+       display_log(buffer);
        break;
    }
    *value = v;
-     
-   sprintf(buffer,"UART Rd address 0x%08x: 0x%08x", address, v);
-   display_log(buffer);
 
    return 1;
 }
