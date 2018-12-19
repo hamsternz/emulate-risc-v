@@ -18,15 +18,15 @@
 #define INACTIVE_PAIR 2
 #define ACTIVE_PAIR   3
 
-#define N_LOG 8
-#define LOG_SHOW 8
+#define N_LOG 6
+#define LOG_SHOW 6
 
 #define N_TRACE 17
 #define TRACE_SHOW 17
 #define TRACE_WIDTH 52
 
-#define N_UART      3
-#define UART_SHOW   3
+#define N_UART      6
+#define UART_SHOW   6
 #define UART_WIDTH 80
 FILE *log_file;
 
@@ -103,7 +103,7 @@ static void update_trace(void) {
 static void update_uart(void) {
   int i, index;
 
-  move(27, 0);
+  move(25, 0);
   attron(COLOR_PAIR(BORDER_PAIR));
   printw("UART data:");
   clrtoeol();
@@ -112,7 +112,7 @@ static void update_uart(void) {
 
   attron(COLOR_PAIR(ACTIVE_PAIR));
   for(i = 0; i < UART_SHOW; i++) {
-     move(28+i,0);
+     move(26+i,0);
      if(uart_lines[index+i])
        printw("%s", uart_lines[index+i]);
   }
