@@ -308,6 +308,7 @@ void display_uart_write(char c) {
 
       /* Empty out the first line */
       memset(uart_lines[N_UART-1],' ', UART_WIDTH);
+      uart_cursor_y--;
     }
   }
   uart_changed = 1;

@@ -85,16 +85,16 @@ int CLINT_get(struct region *r, uint32_t address, uint32_t *value) {
    v = v + (((unsigned char *)r->data)[address+3] << 24); 
 
    switch(address) {
-     case 0x0000:
+     case 0x0000: // MSIP regs
         *value = v;
 	break;
-     case 0x4000:
+     case 0x4000: // Timer Compare Reg
         *value = v;
 	break;
      case 0x4004:
         *value = v;
 	break;
-     case 0xBFF8:
+     case 0xBFF8:   // Cycle count
         *value = riscv_cycle_count_l();
 	break;
      case 0xBFFC:
