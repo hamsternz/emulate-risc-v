@@ -21,9 +21,9 @@
 #define CSR_RDCYCLE    (0xC00)
 #define CSR_RDTIME     (0xC01)
 #define CSR_RDINSTRET  (0xC02) 
-#define CSR_RDCYCLEH   (0xC00)
-#define CSR_RDTIMEH    (0xC01)
-#define CSR_RDINSTRETH (0xC02) 
+#define CSR_RDCYCLEH   (0xC83)
+#define CSR_RDTIMEH    (0xC81)
+#define CSR_RDINSTRETH (0xC82) 
 #define CSR_MCPUID     (0xF00)
 #define CSR_MIMPID     (0xF01)
 
@@ -31,6 +31,25 @@ uint32_t csr[0x1000];
 uint32_t regs[32];
 uint32_t pc;
 int trace_active = 1;
+
+
+#define ALU_ADD  0
+#define ALU_SUB  1
+#define ALU_SLL  2
+#define ALU_SLT  3
+#define ALU_SLTU 4
+#define ALU_XOR  5
+#define ALU_SRL  6
+#define ALU_SRA  7
+#define ALU_OR   8
+#define ALU_AND  9
+ 
+#define CJ_EQ          (0)
+#define CJ_NEQ         (1)
+#define CJ_LT          (2)
+#define CJ_LTU         (3)
+#define CJ_GE          (4)
+#define CJ_GEU         (5)
 
 static int op_auipc(void);
 static int op_lui(void);
@@ -50,6 +69,7 @@ static int op_sltu(void);
 static int op_srl(void);
 static int op_sra(void);
 
+static int op_alu(void);
 static int op_addi(void);
 static int op_andi(void);
 static int op_xori(void);
@@ -129,7 +149,6 @@ struct opcode_entry {
    {"-----------------001-----0100011", op_sh},
    {"-----------------010-----0100011", op_sw},
 
-
    {"-----------------000-----0010011", op_addi},
    {"-----------------010-----0010011", op_slti},
    {"-----------------011-----0010011", op_sltiu},
@@ -182,11 +201,17 @@ int32_t jmpoffset;
 int32_t broffset;
 int32_t imm12wr;
 int32_t imm12;
+int32_t func3;
 uint32_t upper20;
+uint32_t upper7;
 uint32_t csrid;
 uint32_t uimm;
 int shamt;
 uint32_t current_instr;
+uint8_t alu_mode;
+uint8_t alu_res_store;
+uint8_t alu_op2_src_immed;
+uint8_t cond_jump_mode;
 
 /****************************************************************************/
 uint32_t riscv_pc(void) {
@@ -203,9 +228,13 @@ uint32_t riscv_reg(int i) {
   return regs[i];
 }
 /****************************************************************************/
-static void decode(uint32_t instr) {
+static int decode(uint32_t instr) {
   int32_t broffset_12_12, broffset_11_11, broffset_10_05, broffset_04_01;
   int32_t jmpoffset_20_20, jmpoffset_19_12, jmpoffset_11_11, jmpoffset_10_01;
+  int valid = 1;
+  if((instr & 0x3) != 3) {
+    valid = 0;
+  }
   rs1     = (instr >> 15) & 0x1f ;
   rs2     = (instr >> 20) & 0x1F;
   rd      = (instr >> 7)  & 0x1f;
@@ -214,6 +243,8 @@ static void decode(uint32_t instr) {
   shamt   = (instr >> 20) & 0x1f;
   upper20 = instr & 0xFFFFF000;
   imm12   = ((int32_t)instr) >> 20;
+  upper7  = (instr >> 25) & 0x7F;
+  func3   = (instr >> 12) & 0x7;
 
   jmpoffset_20_20 = (int32_t)(instr & 0x80000000)>>11;
   jmpoffset_19_12 = (instr & 0x000FF000);
@@ -232,6 +263,40 @@ static void decode(uint32_t instr) {
   imm12wr  &= 0xFFFFFFE0;
   imm12wr  |= (instr >> 7)  & 0x1f;
   current_instr = instr;
+
+#if 0  
+  switch(func3) {
+     case 0: 
+       alu_mode = ALU_ADD;  break;
+     case 1:
+       if(upper7 == 0) {
+	 alu_mode = ALU_SLL;
+       } else {
+         valid = 0;
+       }
+       break;
+     case 2:
+	     alu_mode = ALU_SLT;  break;
+     case 3:
+	     alu_mode = ALU_SLTU;  break;
+     case 4:
+	     alu_mode = ALU_XOR;  break;
+     case 5:
+       if(upper7 == 0x00) {
+	 alu_mode = ALU_SRL;
+       } else if(upper7 == 0x20) {
+	 alu_mode = ALU_SRA;
+       } else {
+         valid = 0;
+       }
+       break;
+     case 6:
+	 alu_mode = ALU_OR;  break;
+     case 7:
+	 alu_mode = ALU_AND;  break;
+   }
+#endif
+  return valid;
 }
 
 /****************************************************************************/
@@ -314,61 +379,56 @@ static int op_ebreak(void) {                          trace("EBREAK",  0,0,0);
 }
 
 /****************************************************************************/
-static int op_beq(void) {     trace("BEQ   r%i, r%i, %i", rs1, rs2, broffset);
-  if(regs[rs1] == regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
+static int op_condjump(void) {
+  int jump = 0;
+  uint32_t op1, op2;
+  op1 = regs[rs1];
+  op2 = regs[rs2];
+
+  switch(cond_jump_mode) {
+    case CJ_EQ:  jump = (op1 == op2);                    break;
+    case CJ_NEQ: jump = (op1 != op2);                    break;
+    case CJ_LTU: jump = (op1 <  op2);                    break;
+    case CJ_LT:  jump = ((int32_t)op1 <  (int32_t)op2);  break;
+    case CJ_GEU: jump = (op1 >=  op2);                   break;
+    case CJ_GE:  jump = ((int32_t)op1 >= (int32_t)op2);  break;
+    default:     jump = 0;                               break;
   }
+  pc += jump ? broffset : 4;
   return 1;
+}
+/****************************************************************************/
+static int op_beq(void) {     trace("BEQ   r%i, r%i, %i", rs1, rs2, broffset);
+  cond_jump_mode = CJ_EQ;
+  return op_condjump();
 }
 /****************************************************************************/
 static int op_bne(void) {    trace("BNE   r%i, r%i, %i", rs1, rs2, broffset);
-  if(regs[rs1] != regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
-  }
-  return 1;
+  cond_jump_mode = CJ_NEQ;
+  return op_condjump();
 }
 /****************************************************************************/
 static int op_blt(void) {     trace("BLT   r%i, r%i, %i", rs1, rs2, broffset);
-  if((int32_t)regs[rs1] < (int32_t)regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
-  }
-  return 1;
+  cond_jump_mode = CJ_LT;
+  return op_condjump();
 }
 
 /****************************************************************************/
-static int op_bltu(void) {    trace("BLT   r%i, r%i, %i", rs1, rs2, broffset);
-  if((uint32_t)regs[rs1] < (uint32_t)regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
-  }
-  return 1;
+static int op_bltu(void) {    trace("BLTU  r%i, r%i, %i", rs1, rs2, broffset);
+  cond_jump_mode = CJ_LTU;
+  return op_condjump();
 }
 
 /****************************************************************************/
-static int op_bge(void) {     trace("BLT   r%i, r%i, %i", rs1, rs2, broffset);
-  if((int32_t)regs[rs1] >= (int32_t)regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
-  }
-  return 1;
+static int op_bge(void) {     trace("BGE   r%i, r%i, %i", rs1, rs2, broffset);
+  cond_jump_mode = CJ_GE;
+  return op_condjump();
 }
 
 /****************************************************************************/
-static int op_bgeu(void) {    trace("BLT   r%i, r%i, %i", rs1, rs2, broffset);
-  if((uint32_t)regs[rs1] >= (uint32_t)regs[rs2]) {
-    pc += broffset;
-  } else {
-    pc += 4;
-  }
-  return 1;
+static int op_bgeu(void) {    trace("BGEU  r%i, r%i, %i", rs1, rs2, broffset);
+  cond_jump_mode = CJ_GEU;
+  return op_condjump();
 }
 
 /****************************************************************************/
@@ -420,186 +480,163 @@ static int op_fence_i(void) {                           trace("FENCEI",0,0,0);
 }
 
 /****************************************************************************/
-static int op_add(void) {           trace("ADD   r%u, r%u, %i",  rd, rs1, rs2);
+static int op_alu(void) {    
+  uint32_t op1, op2, res; 
 
-  if(rd != 0)
-    regs[rd] = regs[rs1] + regs[rs2];    
+  op1 = regs[rs1];
+  op2 = alu_op2_src_immed ? imm12 : regs[rs2];
+
+  switch(alu_mode) {
+    case ALU_ADD:  res = op1 + op2;                                break;
+    case ALU_SUB:  res = op1 - op2;                                break;
+    case ALU_SLL:  res = op1 << (op2 & 0x1f);                      break;
+    case ALU_SLT:  res = ((int32_t) op1 < (int32_t)op2) ? 1 : 0;   break;
+    case ALU_SLTU: res = ((uint32_t) op1 < (uint32_t)op2) ? 1 : 0; break;
+    case ALU_XOR:  res = op1 ^ op2;                                break;
+    case ALU_SRL:  res = (uint32_t)op1 >> (op2 & 0x1f);            break;
+    case ALU_SRA:  res = (uint32_t)op1 >> (op2 & 0x1f);            break;
+    case ALU_OR:   res = op1 | op2;                                break;
+    case ALU_AND:  res = op1 & op2;                                break;
+    default:       res = 0;                                        break; // Never used?
+  }
+
+  if(alu_res_store && rd != 0) regs[rd] = res;
 
   pc += 4;
   return 1;
+}
+/****************************************************************************/
+static int op_add(void) {           trace("ADD   r%u, r%u, %i",  rd, rs1, rs2);
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_ADD;
+  alu_res_store     = 1;
+  return op_alu();
 }
 /****************************************************************************/
 static int op_addi(void) {       trace("ADDI  r%u, r%u, %i",  rd, rs1, imm12);
-
-  if(rd != 0) regs[rd] = regs[rs1] + imm12;    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_ADD;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_andi(void) {       trace("ADDI  r%u, r%u, %i",  rd, rs1, imm12);
-
-  if(rd != 0) regs[rd] = regs[rs1] + imm12;    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_AND;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_or(void) {            trace("OR    r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0) regs[rd] = regs[rs1] | regs[rs2];    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_OR;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_ori(void) {         trace("ORI   r%u, r%u, %i",  rd, rs1, imm12);
-
-  if(rd != 0) regs[rd] = regs[rs1] | imm12;    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_OR;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_xor(void) {          trace("XOR   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0) regs[rd] = regs[rs1] ^ regs[rs2];    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_XOR;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_xori(void) {       trace("XORI  r%u, r%u, %i",  rd, rs1, imm12);
-  trace("XORI  r%u, r%u, %i",  rd, rs1, imm12);
-
-  if(rd != 0) regs[rd] = regs[rs1] ^ imm12;    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_XOR;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_and(void) {          trace("AND   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0) regs[rd] = regs[rs1] & regs[rs2];    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_AND;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_sub(void) {          trace("SUB   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0) regs[rd] = regs[rs1] - regs[rs2];    
-
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SUB;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_slli(void) {       trace("SLLI  r%u, r%u, %i",  rd, rs1, shamt);
-
-  if(rd != 0) regs[rd] = regs[rs1] << shamt;   
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_SLL;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_slt(void) {          trace("SLT   r%u, r%u, r%u",  rd, rs1, rs2);
-  if(rd != 0)  {
-    if((int32_t) regs[rs1] < (int32_t)regs[rs2])
-      regs[rd] = 1;
-    else
-      regs[rd] = 0;
-  }
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SLT;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_slti(void) {       trace("SLTI  r%u, r%u, %i",  rd, rs1, imm12);
-  
-  if(rd != 0)  {
-    if((int32_t) regs[rs1] < (int32_t)imm12)
-      regs[rd] = 1;
-    else
-      regs[rd] = 0;
-  }
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_SLT;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 int op_sltiu(void) {             trace("SLUI  r%u, r%u, %i",  rd, rs1, imm12);
- 
-  if(rd != 0)  {
-     if((uint32_t) regs[rs1] < (uint32_t)imm12)
-      regs[rd] = 1;
-    else
-      regs[rd] = 0;
-  }
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_SLTU;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_srl(void) {          trace("SRL   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0) regs[rd] = (uint32_t)regs[rs1] >> (regs[rs2] & 0x1f);
-    pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SRL;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_srli(void) {       trace("SRLI  r%u, r%u, %i",  rd, rs1, shamt);
-  if(rd != 0) 
-    regs[rd] = (uint32_t)regs[rs1] >> shamt;
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_SRL;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 int op_sltu(void) {                trace("SLU   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0)  {
-    if((uint32_t) regs[rs1] < (uint32_t)(regs[rs2] & 0x1f))
-      regs[rd] = 1;
-    else
-      regs[rd] = 0;
-  }
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SLTU;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 static int op_sra(void) {          trace("SRA   r%u, r%u, r%u",  rd, rs1, rs2);
-
-  if(rd != 0)
-     regs[rd] = (int32_t)regs[rs1] >> (regs[rs2] & 0x1f);
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SRA;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 int op_srai(void) {              trace("SRAI  r%u, r%u, %i",  rd, rs1, shamt);
-
-  if(rd != 0)
-    regs[rd] = (int32_t)regs[rs1] >> shamt;
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 1;
+  alu_mode          = ALU_SRA;
+  alu_res_store     = 1;
+  return op_alu();
 }
-
 /****************************************************************************/
 int op_sll(void) {                 trace("SLL   r%u, r%u, r%u",  rd, rs1, rs2);
-  if(rd != 0) 
-    regs[rd] = regs[rs1] << shamt;   
-  pc += 4;
-  return 1;
+  alu_op2_src_immed = 0;
+  alu_mode          = ALU_SLL;
+  alu_res_store     = 1;
+  return op_alu();
 }
 /****************************************************************************/
 static int op_lb(void) {          trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
@@ -866,7 +903,8 @@ static int do_op(void) {
     return 0;
   }
   /* Decode */
-  decode(instr);
+  if(!decode(instr)) 
+    return 0;
  
   /* Execute */
   for(i = 0; i < sizeof(opcodes)/sizeof(struct opcode_entry); i++) {
@@ -896,10 +934,6 @@ int riscv_run(void) {
   if(csr[CSR_RDCYCLE] == 0)
     csr[CSR_RDCYCLEH]++;
   csr[CSR_MCYCLE] = csr[CSR_RDCYCLE];
-
-  csr[CSR_RDTIME]++;
-  if(csr[CSR_RDTIME] == 0)
-    csr[CSR_RDTIMEH]++;
 
   if(do_op()) {
     csr[CSR_RDTIME]++;
