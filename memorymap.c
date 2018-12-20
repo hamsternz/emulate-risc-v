@@ -62,7 +62,7 @@ static int add_region(uint32_t base, uint32_t size,
 }
 
 /****************************************************************************/
-static int aligned_read(uint32_t address, uint32_t *value) {
+int memorymap_aligned_read(uint32_t address, uint32_t *value) {
    struct region *r = first_region;
 
    /* Find the region */
@@ -89,7 +89,7 @@ static int aligned_read(uint32_t address, uint32_t *value) {
 }
 
 /****************************************************************************/
-static int aligned_write(uint32_t address, uint8_t mask, uint32_t value) {
+int memorymap_aligned_write(uint32_t address, uint8_t mask, uint32_t value) {
    struct region *r = first_region;
 
    /* Find the region */
@@ -199,21 +199,21 @@ int memorymap_read(uint32_t address, uint8_t width, uint32_t *value) {
    /* Read the memory region */
    switch(address & 3) {
      case 0:
-       if(!aligned_read(address+0, &v))  return 0;
+       if(!memorymap_aligned_read(address+0, &v))  return 0;
        break;
      case 1:
-       if(!aligned_read(address-1, &v))  return 0;
-       if(!aligned_read(address+3, &v1)) return 0;
+       if(!memorymap_aligned_read(address-1, &v))  return 0;
+       if(!memorymap_aligned_read(address+3, &v1)) return 0;
        v = (v>>8) | (v1 <<24);
        break;
      case 2:
-       if(!aligned_read(address-2, &v))  return 0;
-       if(!aligned_read(address+2, &v1)) return 0;
+       if(!memorymap_aligned_read(address-2, &v))  return 0;
+       if(!memorymap_aligned_read(address+2, &v1)) return 0;
        v = (v>>16) | (v1 <<16);
        break;
      default:
-       if(!aligned_read(address-3, &v))  return 0;
-       if(!aligned_read(address+1, &v1)) return 0;
+       if(!memorymap_aligned_read(address-3, &v))  return 0;
+       if(!memorymap_aligned_read(address+1, &v1)) return 0;
        v = (v>>24) | (v1 <<8);
        break;
    }
@@ -229,56 +229,56 @@ int memorymap_write(uint32_t address, uint8_t width, uint32_t value) {
      case 0:
        switch(width) {
 	 case 4:
-           if(!aligned_write(address+0, 0xF, value))  return 0;
+           if(!memorymap_aligned_write(address+0, 0xF, value))  return 0;
 	   return 1;
 	 case 2:
-           if(!aligned_write(address+0, 0x3, value))  return 0;
+           if(!memorymap_aligned_write(address+0, 0x3, value))  return 0;
 	   return 1;
 	 case 1:
-           if(!aligned_write(address+0, 0x1, value))  return 0;
+           if(!memorymap_aligned_write(address+0, 0x1, value))  return 0;
 	   return 1;
        }
        break;
      case 1:
        switch(width) {
 	 case 4:
-           if(!aligned_write(address-1, 0xE, value<<8 ))  return 0;
-           if(!aligned_write(address+3, 0x1, value>>24))  return 0;
+           if(!memorymap_aligned_write(address-1, 0xE, value<<8 ))  return 0;
+           if(!memorymap_aligned_write(address+3, 0x1, value>>24))  return 0;
 	   return 1;
 	 case 2:
-           if(!aligned_write(address-1, 0x6, value<<8 ))  return 0;
+           if(!memorymap_aligned_write(address-1, 0x6, value<<8 ))  return 0;
 	   return 1;
 	 case 1:
-           if(!aligned_write(address-1, 0x2, value<<8 ))  return 0;
+           if(!memorymap_aligned_write(address-1, 0x2, value<<8 ))  return 0;
 	   return 1;
        }
        break;
      case 2:
        switch(width) {
 	 case 4:
-           if(!aligned_write(address-2, 0xC, value<<16))  return 0;
-           if(!aligned_write(address+2, 0x3, value>>16))  return 0;
+           if(!memorymap_aligned_write(address-2, 0xC, value<<16))  return 0;
+           if(!memorymap_aligned_write(address+2, 0x3, value>>16))  return 0;
 	   return 1;
 	 case 2:
-           if(!aligned_write(address-2, 0xC, value<<16))  return 0;
+           if(!memorymap_aligned_write(address-2, 0xC, value<<16))  return 0;
 	   return 1;
 	 case 1:
-           if(!aligned_write(address-2, 0x4, value<<16))  return 0;
+           if(!memorymap_aligned_write(address-2, 0x4, value<<16))  return 0;
 	   return 1;
        }
        break;
      default:
        switch(width) {
 	 case 4:
-           if(!aligned_write(address-3, 0x8, value<<24))  return 0;
-           if(!aligned_write(address+1, 0x7, value>>8 ))  return 0;
+           if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
+           if(!memorymap_aligned_write(address+1, 0x7, value>>8 ))  return 0;
 	   return 1;
 	 case 2:
-           if(!aligned_write(address-3, 0x8, value<<24))  return 0;
-           if(!aligned_write(address+1, 0x1, value>>8 ))  return 0;
+           if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
+           if(!memorymap_aligned_write(address+1, 0x1, value>>8 ))  return 0;
 	   return 1;
 	 case 1:
-           if(!aligned_write(address-3, 0x8, value<<24))  return 0;
+           if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
 	   return 1;
        }
        break;

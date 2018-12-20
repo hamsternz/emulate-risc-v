@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "riscv.h"
+#include "memory.h"
 #include "memorymap.h"
 #include "display.h"
 
@@ -21,7 +22,8 @@ int main(int argc, char *argv[]) {
     fprintf(stderr,"Unable to initialise display\n");
     return 0;
   }
-  if(!memorymap_initialise(NULL)) {
+
+  if(!memory_initialise()) {
     return 0;
   }
   display_log("Memory inisitalised");
@@ -34,6 +36,10 @@ int main(int argc, char *argv[]) {
   display_log("Press SPACE to run a sigle instruction, or 'r' to run. 'q' to quit");
 
   while(!quit) {
+    if(run) {
+       if(!memory_run())
+         run = 0;
+    }
     if(run) {
        if(!riscv_run() ||run == 1)
          run = 0;
@@ -49,9 +55,10 @@ int main(int argc, char *argv[]) {
   riscv_finish();
   display_log("RISC-V shutdown");
 //  memorymap_dump();
-  memorymap_finish();
+  memory_finish();
   display_log("Memory shutdown");
   display_update();
   display_end();
+  
   return 0;
 }
