@@ -27,6 +27,7 @@
 #define CSR_MCPUID     (0xF00)
 #define CSR_MIMPID     (0xF01)
 
+/* CPU State info */
 uint32_t csr[0x1000];
 uint32_t regs[32];
 uint32_t pc;
@@ -36,196 +37,203 @@ int trace_active = 1;
 #define ALU_ADD            ( 0)
 #define ALU_SUB            ( 1)
 #define ALU_SLL            ( 2)
-#define ALU_SLT            ( 3)
-#define ALU_SLTU           ( 4)
-#define ALU_XOR            ( 5)
-#define ALU_SRL            ( 6)
-#define ALU_SRA            ( 7)
-#define ALU_OR             ( 8)
-#define ALU_AND            ( 9)
-#define ALU_CJ_EQ          (10)
-#define ALU_CJ_NEQ         (11)
-#define ALU_CJ_LT          (12)
-#define ALU_CJ_LTU         (13)
-#define ALU_CJ_GE          (14)
-#define ALU_CJ_GEU         (15)
-#define ALU_NEXT_I         (16)
-#define ALU_PC_U20         (17)
-#define ALU_U20            (18)
+#define ALU_SEQ            ( 3)
+#define ALU_SLT            ( 4)
+#define ALU_SLTU           ( 5)
+#define ALU_XOR            ( 6)
+#define ALU_SRL            ( 7)
+#define ALU_SRA            ( 8)
+#define ALU_OR             ( 9)
+#define ALU_AND            (10)
+#define ALU_NEXT_I         (11)
+#define ALU_PC_U20         (12)
+#define ALU_U20            (13)
+#define ALU_MUL            (14)
+#define ALU_MULH           (15)
+#define ALU_MULHSU         (16)
+#define ALU_MULHU          (17)
+#define ALU_DIV            (18)
+#define ALU_DIVU           (19)
+#define ALU_REM            (20)
+#define ALU_REMU           (21)
+#define ALU_CSR            (22)
+#define ALU_NUL            (99) // Just so people don't get confused
 
-#define CSR_RW   (0)
-#define CSR_RS   (1)
-#define CSR_RC   (2)
-#define CSR_RWI  (3)
-#define CSR_RSI  (4)
-#define CSR_RCI  (5)
+#define CSR_NOP  (0)
+#define CSR_RW   (1)
+#define CSR_RS   (2)
+#define CSR_RC   (3)
+#define CSR_RWI  (4)
+#define CSR_RSI  (5)
+#define CSR_RCI  (6)
 
-#define PC_NEXT_I     (0)
-#define PC_COND_JUMP  (1)
-#define PC_REL_JUMP   (2)
-#define PC_INDIRECT   (3)
+#define PC_NEXT_I         (0)
+#define PC_COND_JUMP      (1)
+#define PC_COND_JUMP_INV  (2)
+#define PC_REL_JUMP       (3)
+#define PC_INDIRECT       (4)
 
-static int op_auipc(void);
-static int op_lui(void);
-static int op_jal(void);
-static int op_jalr(void);
-static int op_fence(void);
-static int op_fence_i(void);
+/* Breaking the instruction into fields */
+static uint8_t rs1, rs2, rd, func3;
+static int32_t jmpoffset, broffset, imm12wr, imm12;
+static uint32_t upper20, upper7, csrid, uimm, shamt;
 
-static int op_add(void);
-static int op_sub(void);
-static int op_and(void);
-static int op_xor(void);
-static int op_or(void);
-static int op_sll(void);
-static int op_slt(void);
-static int op_sltu(void);
-static int op_srl(void);
-static int op_sra(void);
+/* Internal control signals */
+static uint32_t current_instr;
+static uint8_t  alu_mode;
+static uint8_t  alu_res_store;
+static uint8_t  alu_op2_src_immed;
+static uint8_t  csr_mode;
+static uint8_t  pc_next_instr_mode;
 
-static int op_addi(void);
-static int op_andi(void);
-static int op_xori(void);
-static int op_ori(void);
-static int op_slli(void);
-static int op_slti(void);
-static int op_sltiu(void);
-static int op_srli(void);
-static int op_srai(void);
+/* Function to store the trace in the trace buffer */
+static void trace(char *fmt, uint32_t a, uint32_t b, uint32_t c);
 
-static int op_beq(void);
-static int op_bne(void);
-static int op_blt(void);
-static int op_bge(void);
-static int op_bltu(void);
-static int op_bgeu(void);
+/* Functions for running opcodes */
+static int op_unified(void);
+static int op_auipc(void)   { trace("AUIPC  r%u, x%08x",    rd,  upper20,   0);        return op_unified(); }
+static int op_lui(void)     { trace("LUI    r%u, x%08x",    rd,  upper20,   0);        return op_unified(); }
+static int op_jal(void)     { trace("JAL    r%u, %i",       rd,  jmpoffset, 0);        return op_unified(); }
+static int op_jalr(void)    { trace("JALR   r%u, r%u + %i", rd,  rs1,       imm12);    return op_unified(); }
+static int op_fence(void)   { trace("FENCE",                0,   0,         0);        return op_unified(); }
+static int op_fence_i(void) { trace("FENCEI",               0,   0,         0);        return op_unified(); }
+static int op_beq(void)     { trace("BEQ    r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); }
+static int op_bne(void)     { trace("BNE    r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); }
+static int op_blt(void)     { trace("BLT    r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); }
+static int op_bltu(void)    { trace("BLTU   r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); } 
+static int op_bge(void)     { trace("BGE    r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); }
+static int op_bgeu(void)    { trace("BGEU   r%i, r%i, %i",  rs1, rs2,       broffset); return op_unified(); } 
+static int op_add(void)     { trace("ADD    r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_addi(void)    { trace("ADDI   r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_andi(void)    { trace("ADDI   r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_or(void)      { trace("OR     r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_ori(void)     { trace("ORI    r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_xor(void)     { trace("XOR    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_xori(void)    { trace("XORI   r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_and(void)     { trace("AND    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_sub(void)     { trace("SUB    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_slli(void)    { trace("SLLI   r%u, r%u, %i",  rd,  rs1,       shamt);    return op_unified(); }
+static int op_slt(void)     { trace("SLT    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_slti(void)    { trace("SLTI   r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_sltiu(void)   { trace("SLUI   r%u, r%u, %i",  rd,  rs1,       imm12);    return op_unified(); }
+static int op_srl(void)     { trace("SRL    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_srli(void)    { trace("SRLI   r%u, r%u, %i",  rd,  rs1,       shamt);    return op_unified(); }
+static int op_sltu(void)    { trace("SLU    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_sra(void)     { trace("SRA    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+static int op_srai(void)    { trace("SRAI   r%u, r%u, %i",  rd,  rs1,       shamt);    return op_unified(); }
+static int op_sll(void)     { trace("SLL    r%u, r%u, r%u", rd,  rs1,       rs2);      return op_unified(); }
+
+static int op_csrrw(void)   { trace("CSRRW  r%u, r%u, %i",  rd,  rs1,       csrid);    return op_unified(); }
+static int op_csrrs(void)   { trace("CSRRS  r%u, r%u, %i",  rd,  rs1,       csrid);    return op_unified(); }
+static int op_csrrc(void)   { trace("CSRRS  r%u, r%u, %i",  rd,  rs1,       csrid);    return op_unified(); }
+static int op_csrrwi(void)  { trace("CSRRWI r%u, r%u, %i",  rd,  uimm,      csrid);    return op_unified(); }
+static int op_csrrsi(void)  { trace("CSRRSI r%u, r%u, %i",  rd,  uimm,      csrid);    return op_unified(); }
+static int op_csrrci(void)  { trace("CSRRCI r%u, r%u, %i",  rd,  uimm,      csrid);    return op_unified(); }
+#ifdef ALLOW_RV32M
+static int op_mul(void)     { trace("MUL    r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_mulh(void)    { trace("MULH   r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_mulhsu(void)  { trace("MULHUS r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_mulhu(void)   { trace("MULHUS r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_div(void)     { trace("DIV    r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_divu(void)    { trace("DIVU   r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_rem(void)     { trace("REM    r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+static int op_remu(void)    { trace("REMU   r%u, r%u, %i",  rd,  rs1,       rs2);      return op_unified(); }
+#endif
 
 static int op_lb(void);
-static int op_lh(void);
-static int op_lw(void);
 static int op_lbu(void);
+static int op_lh(void);
 static int op_lhu(void);
+static int op_lw(void);
 
 static int op_sb(void);
 static int op_sh(void);
 static int op_sw(void);
 
-static int op_ecall(void);
 static int op_ebreak(void);
-//static int op_ereturn(uint32_t opcode);
-
-static int op_csrrsi(void);
-static int op_csrrci(void);
-static int op_csrrwi(void);
-static int op_csrrs(void);
-static int op_csrrc(void);
-static int op_csrrw(void);
-
-#ifdef ALLOW_RV32M
-static int op_mul(void);
-static int op_mulh(void);
-static int op_mulhsu(void);
-static int op_mulhu(void);
-static int op_div(void);
-static int op_divu(void);
-static int op_rem(void);
-static int op_remu(void);
-#endif 
-
+static int op_ecall(void);
 static int op_unknown(void);
 
 struct opcode_entry { 
   char *spec;
   int (*func)(void);
+  uint8_t  op2_immediate;
+  uint8_t  alu_mode;
+  uint8_t  store_result;
+  uint8_t  pc_mode;
+  uint8_t  csr_mode;
   uint32_t value;
   uint32_t mask;
-} opcodes[] = {
-   {"-------------------------0010111", op_auipc},
-   {"-------------------------0110111", op_lui},
-   {"-------------------------1101111", op_jal},
-   {"-----------------000-----1100111", op_jalr}, 
+} opcodes[] = {                             // immed op2 , ALU, store, pc_mode,     CSR Update
+   {"-------------------------0010111", op_auipc,    0, ALU_PC_U20,  1, PC_NEXT_I,        CSR_NOP},
+   {"-------------------------0110111", op_lui,      0, ALU_U20,     1, PC_NEXT_I,        CSR_NOP},
+   {"-------------------------1101111", op_jal,      0, ALU_NEXT_I,  1, PC_REL_JUMP,      CSR_NOP},
+   {"-----------------000-----1100111", op_jalr,     0, ALU_NEXT_I,  1, PC_INDIRECT,      CSR_NOP},
 
-   {"-----------------000-----1100011", op_beq},
-   {"-----------------001-----1100011", op_bne},
-   {"-----------------100-----1100011", op_blt},
-   {"-----------------101-----1100011", op_bge},
-   {"-----------------110-----1100011", op_bltu},
-   {"-----------------111-----1100011", op_bgeu},
+   {"-----------------000-----1100011", op_beq,      0, ALU_SEQ,     0, PC_COND_JUMP,     CSR_NOP},
+   {"-----------------001-----1100011", op_bne,      0, ALU_SEQ,     0, PC_COND_JUMP_INV, CSR_NOP},
+   {"-----------------100-----1100011", op_blt,      0, ALU_SLT,     0, PC_COND_JUMP,     CSR_NOP},
+   {"-----------------101-----1100011", op_bge,      0, ALU_SLT,     0, PC_COND_JUMP_INV, CSR_NOP},
+   {"-----------------110-----1100011", op_bltu,     0, ALU_SLTU,    0, PC_COND_JUMP,     CSR_NOP},
+   {"-----------------111-----1100011", op_bgeu,     0, ALU_SLTU,    0, PC_COND_JUMP_INV, CSR_NOP},
 
-   {"-----------------000-----0000011", op_lb},
-   {"-----------------001-----0000011", op_lh},
-   {"-----------------010-----0000011", op_lw},
-   {"-----------------100-----0000011", op_lbu},
-   {"-----------------101-----0000011", op_lhu},
+   {"-----------------000-----0000011", op_lb,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------001-----0000011", op_lh,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------010-----0000011", op_lw,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------100-----0000011", op_lbu,      0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------101-----0000011", op_lhu,      0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
 
-   {"-----------------000-----0100011", op_sb},
-   {"-----------------001-----0100011", op_sh},
-   {"-----------------010-----0100011", op_sw},
+   {"-----------------000-----0100011", op_sb,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------001-----0100011", op_sh,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"-----------------010-----0100011", op_sw,       0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
 
-   {"-----------------000-----0010011", op_addi},
-   {"-----------------010-----0010011", op_slti},
-   {"-----------------011-----0010011", op_sltiu},
-   {"-----------------100-----0010011", op_xori},
-   {"-----------------110-----0010011", op_ori},
-   {"-----------------111-----0010011", op_andi},
-   {"0000000----------001-----0010011", op_slli},
-   {"0000000----------101-----0010011", op_srli},
-   {"0100000----------101-----0010011", op_srai},
+   {"-----------------000-----0010011", op_addi,     1, ALU_ADD,     1, PC_NEXT_I,        CSR_NOP},
+   {"-----------------010-----0010011", op_slti,     1, ALU_SLT,     1, PC_NEXT_I,        CSR_NOP},
+   {"-----------------011-----0010011", op_sltiu,    1, ALU_SLTU,    1, PC_NEXT_I,        CSR_NOP},
+   {"-----------------100-----0010011", op_xori,     1, ALU_XOR,     1, PC_NEXT_I,        CSR_NOP},
+   {"-----------------110-----0010011", op_ori,      1, ALU_OR,      1, PC_NEXT_I,        CSR_NOP},
+   {"-----------------111-----0010011", op_andi,     1, ALU_AND,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------001-----0010011", op_slli,     1, ALU_SLL,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------101-----0010011", op_srli,     1, ALU_SRL,     1, PC_NEXT_I,        CSR_NOP},
+   {"0100000----------101-----0010011", op_srai,     1, ALU_SRA,     1, PC_NEXT_I,        CSR_NOP},
              
-   {"0000000----------000-----0110011", op_add},
-   {"0100000----------000-----0110011", op_sub},
-   {"0000000----------001-----0110011", op_sll},
-   {"0000000----------010-----0110011", op_slt},
-   {"0000000----------011-----0110011", op_sltu},
-   {"0000000----------100-----0110011", op_xor},
-   {"0000000----------101-----0110011", op_srl},
-   {"0100000----------101-----0110011", op_sra},
-   {"0000000----------110-----0110011", op_or},
-   {"0000000----------111-----0110011", op_and},
+   {"0000000----------000-----0110011", op_add,      0, ALU_ADD,     1, PC_NEXT_I,        CSR_NOP},
+   {"0100000----------000-----0110011", op_sub,      0, ALU_SUB,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------001-----0110011", op_sll,      0, ALU_SLL,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------010-----0110011", op_slt,      0, ALU_SLT,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------011-----0110011", op_sltu,     0, ALU_SLTU,    1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------100-----0110011", op_xor,      0, ALU_XOR,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------101-----0110011", op_srl,      0, ALU_SRL,     1, PC_NEXT_I,        CSR_NOP},
+   {"0100000----------101-----0110011", op_sra,      0, ALU_SRA,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------110-----0110011", op_or,       0, ALU_OR,      1, PC_NEXT_I,        CSR_NOP},
+   {"0000000----------111-----0110011", op_and,      0, ALU_AND,     1, PC_NEXT_I,        CSR_NOP},
 
-   {"0000--------00000000000000001111", op_fence},
-   {"00000000000000000001000000001111", op_fence_i},
+   {"0000--------00000000000000001111", op_fence,    0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"00000000000000000001000000001111", op_fence_i,  0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
 
-   {"00000000000000000000000001110011", op_ecall},
-   {"00000000000100000000000001110011", op_ebreak},
+   {"00000000000000000000000001110011", op_ecall,    0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
+   {"00000000000100000000000001110011", op_ebreak,   0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP},
 
-   {"-----------------001-----1110011", op_csrrw},
-   {"-----------------010-----1110011", op_csrrs},
-   {"-----------------011-----1110011", op_csrrc},
-   {"-----------------101-----1110011", op_csrrwi},
-   {"-----------------110-----1110011", op_csrrsi},
-   {"-----------------111-----1110011", op_csrrci},
+   {"-----------------001-----1110011", op_csrrw,    0, ALU_CSR,     1, PC_NEXT_I,        CSR_RW},
+   {"-----------------010-----1110011", op_csrrs,    0, ALU_CSR,     1, PC_NEXT_I,        CSR_RS},
+   {"-----------------011-----1110011", op_csrrc,    0, ALU_CSR,     1, PC_NEXT_I,        CSR_RC},
+   {"-----------------101-----1110011", op_csrrwi,   0, ALU_CSR,     1, PC_NEXT_I,        CSR_RWI},
+   {"-----------------110-----1110011", op_csrrsi,   0, ALU_CSR,     1, PC_NEXT_I,        CSR_RSI},
+   {"-----------------111-----1110011", op_csrrci,   0, ALU_CSR,     1, PC_NEXT_I,        CSR_RCI},
 #ifdef ALLOW_RV32M
-   // RV32M instructions 
-   {"0000001----------000-----0110011", op_mul},     //TODO set pattern
-   {"0000001----------001-----0110011", op_mulh},    //TODO set pattern
-   {"0000001----------010-----0110011", op_mulhsu},  //TODO set pattern
-   {"0000001----------011-----0110011", op_mulhu},   //TODO set pattern
-   {"0000001----------100-----0110011", op_div},     //TODO set pattern
-   {"0000001----------101-----0110011", op_divu},    //TODO set pattern
-   {"0000001----------110-----0110011", op_rem},     //TODO set pattern
-   {"0000001----------111-----0110011", op_remu},    //TODO set pattern
+   {"0000001----------000-----0110011", op_mul,      0, ALU_MUL,     1, PC_NEXT_I,        CSR_NOP},
+   // RV32M instructions  
+   {"0000001----------001-----0110011", op_mulh,     0, ALU_MULH,    1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------010-----0110011", op_mulhsu,   0, ALU_MULHSU,  1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------011-----0110011", op_mulhu,    0, ALU_MULHU,   1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------100-----0110011", op_div,      0, ALU_DIV,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------101-----0110011", op_divu,     0, ALU_DIVU,    1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------110-----0110011", op_rem,      0, ALU_REM,     1, PC_NEXT_I,        CSR_NOP},
+   {"0000001----------111-----0110011", op_remu,     0, ALU_REMU,    1, PC_NEXT_I,        CSR_NOP},
 #endif
-   {"--------------------------------", op_unknown}  // Catches all the others
+   {"--------------------------------", op_unknown,  0, ALU_NUL,     0, PC_NEXT_I,        CSR_NOP}
 };
 
-static int rs1, rs2, rd;
-int32_t jmpoffset;
-int32_t broffset;
-int32_t imm12wr;
-int32_t imm12;
-int32_t func3;
-uint32_t upper20;
-uint32_t upper7;
-uint32_t csrid;
-uint32_t uimm;
-int shamt;
-uint32_t current_instr;
-uint8_t alu_mode;
-uint8_t alu_res_store;
-uint8_t alu_op2_src_immed;
-uint8_t crs_mode;
-uint8_t pc_next_instr_mode;
 
 /****************************************************************************/
 uint32_t riscv_pc(void) {
@@ -249,10 +257,10 @@ static int decode(uint32_t instr) {
   if((instr & 0x3) != 3) {
     valid = 0;
   }
+  csrid   = (instr >> 20);
   rs1     = (instr >> 15) & 0x1f ;
   rs2     = (instr >> 20) & 0x1F;
-  rd      = (instr >> 7)  & 0x1f;
-  csrid   = (instr >> 20);
+  rd      = (instr >>  7) & 0x1f;
   uimm    = (instr >> 15) & 0x1f;
   shamt   = (instr >> 20) & 0x1f;
   upper20 = instr & 0xFFFFF000;
@@ -264,16 +272,16 @@ static int decode(uint32_t instr) {
   jmpoffset_19_12 = (instr & 0x000FF000);
   jmpoffset_11_11 = (instr & 0x00100000) >>  9;
   jmpoffset_10_01 = (instr & 0x7FE00000) >> 20;
-  jmpoffset = jmpoffset_20_20 | jmpoffset_19_12 | jmpoffset_11_11 | jmpoffset_10_01;
+  jmpoffset       = jmpoffset_20_20 | jmpoffset_19_12 | jmpoffset_11_11 | jmpoffset_10_01;
 
   broffset_12_12 = (int)(instr & 0x80000000) >> 19;
   broffset_11_11 = (instr & 0x00000080) << 4;
   broffset_10_05 = (instr & 0x7E000000) >> 20;
   broffset_04_01 = (instr & 0x00000F00) >> 7;
-  broffset = broffset_12_12 | broffset_11_11 | broffset_10_05 | broffset_04_01;
+  broffset       = broffset_12_12 | broffset_11_11 | broffset_10_05 | broffset_04_01;
 
   imm12wr   =  instr; /* Note - becomes signed */
-  imm12wr  >>= 20;
+  imm12wr >>= 20;
   imm12wr  &= 0xFFFFFFE0;
   imm12wr  |= (instr >> 7)  & 0x1f;
   current_instr = instr;
@@ -343,7 +351,7 @@ int riscv_initialise(void) {
 }
 
 /****************************************************************************/
-static int op_unknown(void) {           trace("???? (%08x)", current_instr,0,0);
+static int op_unknown(void) {         trace("???? (%08x)", current_instr,0,0);
   exception("Unknown Opcode exception");
   return 0;
 }
@@ -362,407 +370,103 @@ static int op_ebreak(void) {                          trace("EBREAK",  0,0,0);
 
 /****************************************************************************/
 static int op_unified(void) {
-  uint32_t op1, op2, res; 
+  uint32_t op1, op2, res, csr_res; 
   uint32_t pc_next_i, pc_cond_jump, pc_rel_jump, pc_indirect; 
 
-  op1 = regs[rs1];
-  op2 = alu_op2_src_immed ? imm12 : regs[rs2];
-
+  /*******************************************************
+   * Build local variables based on global state 
+   ******************************************************/
+  /* Options for next PC value */
   pc_next_i    = pc + 4;
   pc_cond_jump = pc + broffset;
   pc_rel_jump  = pc + jmpoffset;
   pc_indirect  = (regs[rs1] + imm12) & (~1);
 
+  /* Operands */
+  op1 = regs[rs1];
+  op2 = alu_op2_src_immed ? imm12 : regs[rs2];
 
+  /* Find the results */
   switch(alu_mode) {
-    case ALU_ADD:    res = op1 + op2;                                break;
-    case ALU_SUB:    res = op1 - op2;                                break;
-    case ALU_SLL:    res = op1 << (op2 & 0x1f);                      break;
-    case ALU_SLT:    res = ((int32_t)  op1 < (int32_t)op2)  ? 1 : 0; break;
-    case ALU_SLTU:   res = ((uint32_t) op1 < (uint32_t)op2) ? 1 : 0; break;
-    case ALU_XOR:    res = op1 ^ op2;                                break;
-    case ALU_SRL:    res = (uint32_t)op1 >> (op2 & 0x1f);            break;
-    case ALU_SRA:    res = (uint32_t)op1 >> (op2 & 0x1f);            break;
-    case ALU_OR:     res = op1 | op2;                                break;
-    case ALU_AND:    res = op1 & op2;                                break;
+    case ALU_ADD:    res = op1 + op2;                                             break;
+    case ALU_SUB:    res = op1 - op2;                                             break;
+    case ALU_SLL:    res = op1 << (op2 & 0x1f);                                   break;
+    case ALU_XOR:    res = op1 ^ op2;                                             break;
+    case ALU_SRL:    res = (uint32_t)op1 >> (op2 & 0x1f);                         break;
+    case ALU_SRA:    res = (uint32_t)op1 >> (op2 & 0x1f);                         break;
+    case ALU_OR:     res = op1 | op2;                                             break;
+    case ALU_AND:    res = op1 & op2;                                             break;
 
-    // Maybe second ALU with same inputs? 
-    case ALU_CJ_EQ:  res = (op1 == op2);                             break;
-    case ALU_CJ_NEQ: res = (op1 != op2);                             break;
-    case ALU_CJ_LTU: res = (op1 <  op2);                             break; // Unify with SLT?
-    case ALU_CJ_LT:  res = ((int32_t)op1 <  (int32_t)op2);           break; // Unify with SLTU?
-    case ALU_CJ_GEU: res = (op1 >=  op2);                            break;
-    case ALU_CJ_GE:  res = ((int32_t)op1 >= (int32_t)op2);           break;
+    case ALU_SEQ:    res = (op1 == op2)                     ? 1 : 0;              break;
+    case ALU_SLT:    res = ((int32_t)  op1 < (int32_t)op2)  ? 1 : 0;              break;
+    case ALU_SLTU:   res = ((uint32_t) op1 < (uint32_t)op2) ? 1 : 0;              break;
+
+    case ALU_MUL:    res = ((uint64_t)op1 * (uint64_t)op2);                       break;
+    case ALU_MULH:   res = ( (int64_t)op1 *  (int64_t)op2) >> 32;                 break;
+    case ALU_MULHSU: res = ( (int64_t)op1 * (uint64_t)op2) >> 32;                 break;
+    case ALU_MULHU:  res = ((uint64_t)op1 * (uint64_t)op2) >> 32;                 break;
+    case ALU_DIV:    res = (op2 == 0) ? 0xFFFFFFFF : (int32_t)op1 / (int32_t)op2; break;
+    case ALU_DIVU:   res = (op2 == 0) ? 0xFFFFFFFF : (int32_t)op1 / (int32_t)op2; break;
+    case ALU_REM:    res = (op2 == 0) ? 0xFFFFFFFF : (int32_t)op1 % (int32_t)op2; break;
+    case ALU_REMU:   res = (op2 == 0) ? 0xFFFFFFFF : (int32_t)op1 % (int32_t)op2; break;
+
     // Maybe seperate
-    case ALU_NEXT_I: res = pc_next_i;                                break;
-    case ALU_PC_U20: res = pc + upper20;                             break;
-    case ALU_U20:    res = upper20;                                  break;
-    default:         res = 0;                                        break; // Never used?
+    case ALU_NEXT_I: res = pc_next_i;                                             break;
+    case ALU_PC_U20: res = pc + upper20;                                          break;
+    case ALU_U20:    res = upper20;                                               break;
+    case ALU_CSR:    res = csr[csrid];                                            break;
+    default:         res = 0;                                                     break; 
   }
 
+  switch(csr_mode) {
+    case CSR_RW:  csr_res = regs[rs1];               break;
+    case CSR_RS:  csr_res = csr[csrid] | regs[rs1];  break;
+    case CSR_RC:  csr_res = csr[csrid] & ~regs[rs1]; break;
+    case CSR_RWI: csr_res = uimm;                    break;
+    case CSR_RSI: csr_res = csr[csrid] | uimm;       break;
+    case CSR_RCI: csr_res = csr[csrid] & ~uimm;      break;
+    default:      csr_res = 0;                       break;
+  }
+
+  if(csr_mode != CSR_NOP) { 
+    char buffer[100];
+    sprintf(buffer,"CSR 0x%03x accessed",csrid);
+    display_log(buffer);
+  }
+
+  /******************************************************************
+   * All assignments from local to global state variables below here
+   *****************************************************************/
+
+  /* Store the results? */
   if(alu_res_store && rd != 0)
     regs[rd] = res;
 
+  /* Any CSR updates? */
+  switch(csr_mode) {
+    case CSR_RW:  if(rs1 != 0) csr[csrid] = csr_res;  break;
+    case CSR_RS:  if(rs1 != 0) csr[csrid] = csr_res;  break;
+    case CSR_RC:  if(rs1 != 0) csr[csrid] = csr_res;  break;
+    case CSR_RWI: csr[csrid] = csr_res;               break;
+    case CSR_RSI: csr[csrid] = csr_res;               break;
+    case CSR_RCI: csr[csrid] = csr_res;               break;
+    default:                                          break;
+  }
+
+  /* Which instruction next? */
   switch(pc_next_instr_mode) {
-    case PC_NEXT_I:  
-      pc = pc_next_i;
-      break;
-    case PC_COND_JUMP: 
-      pc = res ? pc_cond_jump : pc_next_i;
-      break;
-    case PC_REL_JUMP: 
-      pc = pc_rel_jump;
-      break;
-    case PC_INDIRECT:
-      pc = pc_indirect;
-      break;
+    case PC_NEXT_I:        pc = pc_next_i;                      break;
+    case PC_COND_JUMP:     pc = res ? pc_cond_jump : pc_next_i; break;
+    case PC_COND_JUMP_INV: pc = res ? pc_next_i : pc_cond_jump; break;
+    case PC_REL_JUMP:      pc = pc_rel_jump;                    break;
+    case PC_INDIRECT:      pc = pc_indirect;                    break;
   }
 
   return 1;
 }
 
 /****************************************************************************/
-static int op_csr_unified(void) {
-  char buffer[100];
-  sprintf(buffer,"CSR 0x%03x accessed",csrid);
-  display_log(buffer);
-
-  if(rd != 0) regs[rd] = csr[csrid];
-
-  switch(crs_mode) {
-    case CSR_RW:  if(rs1 != 0) csr[csrid]  = regs[rs1];
-      break;
-    case CSR_RS:  if(rs1 != 0) csr[csrid] |= regs[rs1];
-      break;
-    case CSR_RC:  if(rs1 != 0) csr[csrid] &= ~regs[rs1];
-      break;
-    case CSR_RWI: csr[csrid] = uimm;
-      break;
-    case CSR_RSI: csr[csrid] |= uimm;
-      break;
-    case CSR_RCI: csr[csrid] &= ~uimm;
-      break;
-  }
-  pc += 4;
-  return 1;
-}
-
-/****************************************************************************/
-static int op_auipc(void) {          trace("AUIPC r%u, x%08x",  rd, upper20, 0);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_PC_U20;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_lui(void) {              trace("LUI   r%u, x%08x",  rd, upper20, 0);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_U20;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_jal(void) {            trace("JAL   r%u, %i",  rd, jmpoffset, 0);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_NEXT_I;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_REL_JUMP;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_jalr(void) {       trace("JALR  r%u, r%u + %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_NEXT_I;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_INDIRECT;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_fence(void) {                              trace("FENCE",0,0,0);
-  // Make NO-OP
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_EQ;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_fence_i(void) {                           trace("FENCEI",0,0,0);
-  // Make NO-OP
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_EQ;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_beq(void) {     trace("BEQ   r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_EQ;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_bne(void) {    trace("BNE   r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_NEQ;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-/****************************************************************************/
-
-static int op_blt(void) {     trace("BLT   r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_LT;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-/****************************************************************************/
-
-static int op_bltu(void) {    trace("BLTU  r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_LTU;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_bge(void) {     trace("BGE   r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_GE;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-/****************************************************************************/
-static int op_bgeu(void) {    trace("BGEU  r%i, r%i, %i", rs1, rs2, broffset);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_CJ_GEU;
-  alu_res_store     = 0;
-  pc_next_instr_mode = PC_COND_JUMP;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_add(void) {           trace("ADD   r%u, r%u, %i",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_ADD;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_addi(void) {       trace("ADDI  r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_ADD;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_andi(void) {       trace("ADDI  r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_AND;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_or(void) {            trace("OR    r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_OR;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_ori(void) {         trace("ORI   r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_OR;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_xor(void) {          trace("XOR   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_XOR;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_xori(void) {       trace("XORI  r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_XOR;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_and(void) {          trace("AND   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_AND;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_sub(void) {          trace("SUB   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SUB;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_slli(void) {       trace("SLLI  r%u, r%u, %i",  rd, rs1, shamt);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_SLL;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_slt(void) {          trace("SLT   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SLT;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_slti(void) {       trace("SLTI  r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_SLT;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-int op_sltiu(void) {             trace("SLUI  r%u, r%u, %i",  rd, rs1, imm12);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_SLTU;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_srl(void) {          trace("SRL   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SRL;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_srli(void) {       trace("SRLI  r%u, r%u, %i",  rd, rs1, shamt);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_SRL;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-int op_sltu(void) {                trace("SLU   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SLTU;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_sra(void) {          trace("SRA   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SRA;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-int op_srai(void) {              trace("SRAI  r%u, r%u, %i",  rd, rs1, shamt);
-  alu_op2_src_immed = 1;
-  alu_mode          = ALU_SRA;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-int op_sll(void) {                 trace("SLL   r%u, r%u, r%u",  rd, rs1, rs2);
-  alu_op2_src_immed = 0;
-  alu_mode          = ALU_SLL;
-  alu_res_store     = 1;
-  pc_next_instr_mode = PC_NEXT_I;
-  return op_unified();
-}
-
-/****************************************************************************/
-static int op_csrrw(void) {     trace("CSRRW r%u, r%u, %i",  rd, rs1, csrid);
-  crs_mode = CSR_RW;
-  return op_csr_unified();
-}
-
-/****************************************************************************/
-static int op_csrrs(void) { trace("CSRRS r%u, r%u, %i",  rd, rs1, csrid);
-  crs_mode = CSR_RS;
-  return op_csr_unified();
-}
-/****************************************************************************/
-static int op_csrrc(void) { trace("CSRRS r%u, r%u, %i",  rd, rs1, csrid);
-  crs_mode = CSR_RC;
-  return op_csr_unified();
-}
-
-/****************************************************************************/
-static int op_csrrwi(void) { trace("CSRRWI r%u, r%u, %i",  rd, uimm, csrid);
-  crs_mode = CSR_RWI;
-  return op_csr_unified();
-}
-
-/****************************************************************************/
-static int op_csrrsi(void) { trace("CSRRSI r%u, r%u, %i",  rd, uimm, csrid);
-  crs_mode = CSR_RSI;
-  return op_csr_unified();
-}
-
-/****************************************************************************/
-static int op_csrrci(void) { trace("CSRRCI r%u, r%u, %i",  rd, uimm, csrid);
-  crs_mode = CSR_RCI;
-  return op_csr_unified();
-}
-/****************************************************************************/
-static int op_lb(void) {          trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
+static int op_lb(void) {        trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
   
   if(rd != 0) {
     if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
@@ -777,7 +481,7 @@ static int op_lb(void) {          trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
 }
 
 /****************************************************************************/
-static int op_lh(void) {          trace("LH    r%u, r%u + %i",  rd, rs1, imm12);
+static int op_lh(void) {        trace("LH    r%u, r%u + %i",  rd, rs1, imm12);
   
   if(rd != 0) {
     if(!memorymap_read(regs[rs1]+imm12,2, &regs[rd])) 
@@ -793,7 +497,6 @@ static int op_lh(void) {          trace("LH    r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_lw(void) {          trace("LW    r%u, r%u + %i",  rd, rs1, imm12);
-   
   if(rd != 0) {
     if(!memorymap_read(regs[rs1]+imm12,4, &regs[rd])) 
       return 0;
@@ -804,7 +507,6 @@ static int op_lw(void) {          trace("LW    r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_lbu(void) {        trace("LBU   r%u, r%u + %i",  rd, rs1, imm12);
-
   if(rd != 0) {
     if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
       return 0;
@@ -816,7 +518,6 @@ static int op_lbu(void) {        trace("LBU   r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_lhu(void) {        trace("LHU   r%u, r%u + %i",  rd, rs1, imm12);
-
   if(rd != 0) {
     if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
       return 0;
@@ -848,7 +549,6 @@ static int op_sh(void) { trace("SH    r%u+%i, r%u", rs1 , imm12wr, rs2);
 
 /****************************************************************************/
 static int op_sw(void) { trace("SW    r%u+%i, r%u", rs1 , imm12wr, rs2);
-
   if(!memorymap_write(regs[rs1]+imm12wr, 4, regs[rs2])) {
     display_log("SW failed");
     return 0;
@@ -857,90 +557,6 @@ static int op_sw(void) { trace("SW    r%u+%i, r%u", rs1 , imm12wr, rs2);
   return 1;
 }
 
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_mul(void) {          trace("MUL   r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) regs[rd] = ((uint64_t)regs[rs1] * (uint64_t)regs[rs2]);
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_mulh(void) {         trace("MULH  r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) regs[rd] = ((int64_t)regs[rs1] * (int64_t)regs[rs2]) >> 32;
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_mulhsu(void) {      trace("MULHUS r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) regs[rd] = ((int64_t)regs[rs1] * (uint64_t)regs[rs2]) >> 32;
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_mulhu(void) {        trace("MULHU r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) regs[rd] = ((uint64_t)regs[rs1] * (uint64_t)regs[rs2]) >> 32;
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_div(void) {          trace("DIV   r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) {
-    if(regs[rs2] == 0)
-      regs[rd] = 0xFFFFFFFF;
-    else
-      regs[rd] = (int32_t)regs[rs1] / (int32_t)regs[rs2];
-  }
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_divu(void) {         trace("DIVU  r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) {
-    if(regs[rs2] == 0)
-      regs[rd] = 0xFFFFFFFF;
-    else
-      regs[rd] = (uint32_t)regs[rs1] / (uint32_t)regs[rs2];
-  }
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_rem(void) {          trace("REM   r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) {
-    if(regs[rs2] == 0)
-      regs[rd] = 0xFFFFFFFF;
-    else
-      regs[rd] = (int32_t)regs[rs1] % (int32_t)regs[rs2];
-  }
-  pc += 4;
-  return 1;
-}
-#endif
-/****************************************************************************/
-#ifdef ALLOW_RV32M
-static int op_remu(void) {         trace("REMU  r%u, r%u, %i",  rd, rs1, rs2);
-  if(rd != 0) {
-    if(regs[rs2] == 0)
-      regs[rd] = 0xFFFFFFFF;
-    else
-      regs[rd] = (uint32_t)regs[rs1] % (uint32_t)regs[rs2];
-  }
-  pc += 4;
-  return 1;
-}
-#endif
 /****************************************************************************/
 static int do_op(void) {
   uint32_t instr;
@@ -962,6 +578,11 @@ static int do_op(void) {
   /* Execute */
   for(i = 0; i < sizeof(opcodes)/sizeof(struct opcode_entry); i++) {
      if((instr & opcodes[i].mask) == opcodes[i].value) {
+       alu_op2_src_immed  = opcodes[i].op2_immediate;
+       alu_mode           = opcodes[i].alu_mode;
+       alu_res_store      = opcodes[i].store_result;
+       pc_next_instr_mode = opcodes[i].pc_mode;
+       csr_mode           = opcodes[i].csr_mode;
        return opcodes[i].func();
      }
   }
