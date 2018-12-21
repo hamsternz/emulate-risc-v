@@ -1,14 +1,17 @@
 COPTS=-Wall -pedantic -O3 -g
 LOPTS=-lncurses
 
-main : main.o memorymap.o ram.o uart.o riscv.o display.o prci.o rom.o spi.o clint.o gpio.o
-	gcc -o main main.o riscv.o memorymap.o ram.o uart.o display.o prci.o rom.o spi.o clint.o gpio.o $(LOPTS) 
+main : main.o memorymap.o ram.o uart.o riscv.o display.o prci.o rom.o spi.o clint.o gpio.o memory.o
+	gcc -o main main.o riscv.o memorymap.o ram.o uart.o display.o prci.o rom.o spi.o clint.o gpio.o memory.o $(LOPTS) 
 
-main.o : main.c memorymap.h display.h riscv.h
+main.o : main.c memory.h display.h riscv.h
 	gcc -c main.c $(COPTS)
 
 riscv.o : riscv.c riscv.h memorymap.h
 	gcc -c riscv.c $(COPTS)
+
+memory.o : memory.c memory.h
+	gcc -c memory.c $(COPTS)
 
 memorymap.o : memorymap.c memorymap.h region.h ram.h uart.h prci.h rom.h spi.h clint.h gpio.h display.h
 	gcc -c memorymap.c $(COPTS)

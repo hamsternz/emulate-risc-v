@@ -8,12 +8,11 @@
  *
  ********************************************************************/
 #include <stdint.h>
-#include <memory.h>
 #include <stdio.h>
-#include "memorymap.h"
 #include "riscv.h"
 #include "display.h"
 #include "string.h"
+#include "memory.h"
 
 #define ALLOW_RV32M 1
 
@@ -31,6 +30,7 @@
 uint32_t csr[0x1000];
 uint32_t regs[32];
 uint32_t pc;
+uint32_t stalled_count;
 int trace_active = 1;
 
 
@@ -85,6 +85,8 @@ static uint8_t  alu_res_store;
 static uint8_t  alu_op2_src_immed;
 static uint8_t  csr_mode;
 static uint8_t  pc_next_instr_mode;
+static uint8_t  stalled;
+static uint8_t  read_dispatched;
 
 /* Function to store the trace in the trace buffer */
 static void trace(char *fmt, uint32_t a, uint32_t b, uint32_t c);
@@ -240,8 +242,12 @@ uint32_t riscv_pc(void) {
   return pc;
 }
 /****************************************************************************/
-uint32_t riscv_cycle(void) {
+uint32_t riscv_cycle_count(void) {
   return csr[CSR_RDCYCLE];
+}
+/****************************************************************************/
+uint32_t riscv_stalled_count(void) {
+  return stalled_count;
 }
 /****************************************************************************/
 uint32_t riscv_reg(int i) {
@@ -285,6 +291,7 @@ static int decode(uint32_t instr) {
   imm12wr  &= 0xFFFFFFE0;
   imm12wr  |= (instr >> 7)  & 0x1f;
   current_instr = instr;
+  read_dispatched = 0;
 
   return valid;
 }
@@ -469,8 +476,15 @@ static int op_unified(void) {
 static int op_lb(void) {        trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
   
   if(rd != 0) {
-    if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
-      return 0;
+
+    if(!memory_read_request(regs[rs1]+imm12))
+       return 0;
+
+    /* TODO This needs to be converted to a CPU stall */
+    while(memory_read_data_empty()) 
+       memory_run();
+    regs[rd] = memory_read_data();
+
     regs[rd] &= 0x000000FF;
     /* Sign extend */
     if(regs[rd] & 0x80) 
@@ -484,8 +498,14 @@ static int op_lb(void) {        trace("LB    r%u, r%u + %i",  rd, rs1, imm12);
 static int op_lh(void) {        trace("LH    r%u, r%u + %i",  rd, rs1, imm12);
   
   if(rd != 0) {
-    if(!memorymap_read(regs[rs1]+imm12,2, &regs[rd])) 
-      return 0;
+
+    if(!memory_read_request(regs[rs1]+imm12))
+       return 0;
+    /* TODO This needs to be converted to a CPU stall */
+    while(memory_read_data_empty()) 
+       memory_run();
+    regs[rd] = memory_read_data();
+
     regs[rd] &= 0x0000FFFF;
     /* Sign extend */
     if(regs[rd] & 0x8000) 
@@ -497,9 +517,25 @@ static int op_lh(void) {        trace("LH    r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_lw(void) {          trace("LW    r%u, r%u + %i",  rd, rs1, imm12);
+
   if(rd != 0) {
-    if(!memorymap_read(regs[rs1]+imm12,4, &regs[rd])) 
-      return 0;
+    if(!read_dispatched) {
+      stalled = 1;
+      if(!memory_read_request(regs[rs1]+imm12)) {
+	 /* Unable to queue request -  will retry */
+	 return 1;
+      } else {
+        read_dispatched = 1;
+      }
+      return 1;
+    } 
+
+    /* To get here we are stalled waiting for data */
+    if(memory_read_data_empty())  {
+      return 1;
+    }
+    stalled = 0;
+    regs[rd] = memory_read_data();
   }
   pc = pc + 4;
   return 1;
@@ -508,8 +544,14 @@ static int op_lw(void) {          trace("LW    r%u, r%u + %i",  rd, rs1, imm12);
 /****************************************************************************/
 static int op_lbu(void) {        trace("LBU   r%u, r%u + %i",  rd, rs1, imm12);
   if(rd != 0) {
-    if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
-      return 0;
+
+    if(!memory_read_request(regs[rs1]+imm12))
+       return 0;
+    /* TODO This needs to be converted to a CPU stall */
+    while(memory_read_data_empty()) 
+       memory_run();
+    regs[rd] = memory_read_data();
+
     regs[rd] &= 0x000000FF;
   }
   pc = pc + 4;
@@ -519,8 +561,13 @@ static int op_lbu(void) {        trace("LBU   r%u, r%u + %i",  rd, rs1, imm12);
 /****************************************************************************/
 static int op_lhu(void) {        trace("LHU   r%u, r%u + %i",  rd, rs1, imm12);
   if(rd != 0) {
-    if(!memorymap_read(regs[rs1]+imm12,1, &regs[rd])) 
-      return 0;
+    if(!memory_read_request(regs[rs1]+imm12))
+       return 0;
+    /* TODO This needs to be converted to a CPU stall */
+    while(memory_read_data_empty()) 
+       memory_run();
+    regs[rd] = memory_read_data();
+
     regs[rd] &= 0x0000FFFF;
   }
   pc = pc + 4;
@@ -529,7 +576,11 @@ static int op_lhu(void) {        trace("LHU   r%u, r%u + %i",  rd, rs1, imm12);
 
 /****************************************************************************/
 static int op_sb(void) { trace("SB    r%u+%i, r%u", rs1 , imm12wr, rs2);
-  if(!memorymap_write(regs[rs1]+imm12wr, 1, regs[rs2])) {
+    /* TODO This needs to be converted to a CPU stall */
+  while(memory_write_full()) {
+    memory_run();
+  }
+  if(!memory_write_request(regs[rs1]+imm12wr, 0x1, regs[rs2])) {
     display_log("SB failed");
     return 0;
   }
@@ -539,7 +590,11 @@ static int op_sb(void) { trace("SB    r%u+%i, r%u", rs1 , imm12wr, rs2);
 
 /****************************************************************************/
 static int op_sh(void) { trace("SH    r%u+%i, r%u", rs1 , imm12wr, rs2);
-  if(!memorymap_write(regs[rs1]+imm12wr, 2, regs[rs2])) {
+    /* TODO This needs to be converted to a CPU stall */
+  while(memory_write_full()) {
+    memory_run();
+  }
+  if(!memory_write_request(regs[rs1]+imm12wr, 0x3, regs[rs2])) {
     display_log("SH failed");
     return 0;
   }
@@ -549,7 +604,11 @@ static int op_sh(void) { trace("SH    r%u+%i, r%u", rs1 , imm12wr, rs2);
 
 /****************************************************************************/
 static int op_sw(void) { trace("SW    r%u+%i, r%u", rs1 , imm12wr, rs2);
-  if(!memorymap_write(regs[rs1]+imm12wr, 4, regs[rs2])) {
+    /* TODO This needs to be converted to a CPU stall */
+  while(memory_write_full()) {
+    memory_run();
+  }
+  if(!memory_write_request(regs[rs1]+imm12wr, 0xF, regs[rs2])) {
     display_log("SW failed");
     return 0;
   }
@@ -566,18 +625,27 @@ static int do_op(void) {
     return 0;
   }
 
-  /* Fetch */
-  if(!memorymap_read(pc,4, &instr)) {
-    display_log("Unable to fetch instruction");
-    return 0;
+  if(!stalled) {
+    /* Fetch */
+    if(!memory_fetch_request(pc)) {
+      display_log("Unable to fetch instruction");
+      return 0;
+    }
+    /* TODO This needs to be converted to a CPU stall */
+    while(memory_fetch_data_empty()) 
+      memory_run();
+    instr = memory_fetch_data();
+
+    /* Decode */
+    if(!decode(instr)) 
+      return 0;
+  } else {
+    stalled_count++;
   }
-  /* Decode */
-  if(!decode(instr)) 
-    return 0;
  
   /* Execute */
   for(i = 0; i < sizeof(opcodes)/sizeof(struct opcode_entry); i++) {
-     if((instr & opcodes[i].mask) == opcodes[i].value) {
+     if((current_instr & opcodes[i].mask) == opcodes[i].value) {
        alu_op2_src_immed  = opcodes[i].op2_immediate;
        alu_mode           = opcodes[i].alu_mode;
        alu_res_store      = opcodes[i].store_result;

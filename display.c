@@ -86,7 +86,7 @@ static void update_trace(void) {
 
   move(0, 28);
   attron(COLOR_PAIR(BORDER_PAIR));
-  printw("Trace:                     Cycle: %6i", riscv_cycle());
+  printw("Trace:    Stalled %6i     Cycle: %6i", riscv_stalled_count(), riscv_cycle_count());
   clrtoeol();
   index = trace_index-TRACE_SHOW;
   if(index < 0) index = 0;
