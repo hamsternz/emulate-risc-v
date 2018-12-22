@@ -223,17 +223,22 @@ int memorymap_read(uint32_t address, uint8_t width, uint32_t *value) {
 }
 
 /****************************************************************************/
-int memorymap_write(uint32_t address, uint8_t width, uint32_t value) {
+int memorymap_write(uint32_t address, uint32_t width, uint32_t value) {
    /* Read the memory region */
    switch(address & 3) {
      case 0:
        switch(width) {
+	 case 0xFFFFFFFF:
+	 case 0xF:
 	 case 4:
            if(!memorymap_aligned_write(address+0, 0xF, value))  return 0;
 	   return 1;
+	 case 0xFFFF:
+	 case 0x3:
 	 case 2:
            if(!memorymap_aligned_write(address+0, 0x3, value))  return 0;
 	   return 1;
+	 case 0xFF:
 	 case 1:
            if(!memorymap_aligned_write(address+0, 0x1, value))  return 0;
 	   return 1;
@@ -241,13 +246,18 @@ int memorymap_write(uint32_t address, uint8_t width, uint32_t value) {
        break;
      case 1:
        switch(width) {
+	 case 0xFFFFFFFF:
+	 case 0xF:
 	 case 4:
            if(!memorymap_aligned_write(address-1, 0xE, value<<8 ))  return 0;
            if(!memorymap_aligned_write(address+3, 0x1, value>>24))  return 0;
 	   return 1;
+	 case 0xFFFF:
+	 case 3:
 	 case 2:
            if(!memorymap_aligned_write(address-1, 0x6, value<<8 ))  return 0;
 	   return 1;
+	 case 0xFF:
 	 case 1:
            if(!memorymap_aligned_write(address-1, 0x2, value<<8 ))  return 0;
 	   return 1;
@@ -255,13 +265,18 @@ int memorymap_write(uint32_t address, uint8_t width, uint32_t value) {
        break;
      case 2:
        switch(width) {
+	 case 0xFFFFFFFF:
+	 case 0xF:
 	 case 4:
            if(!memorymap_aligned_write(address-2, 0xC, value<<16))  return 0;
            if(!memorymap_aligned_write(address+2, 0x3, value>>16))  return 0;
 	   return 1;
+	 case 0xFFFF:
+	 case 3:
 	 case 2:
            if(!memorymap_aligned_write(address-2, 0xC, value<<16))  return 0;
 	   return 1;
+	 case 0xFF:
 	 case 1:
            if(!memorymap_aligned_write(address-2, 0x4, value<<16))  return 0;
 	   return 1;
@@ -269,14 +284,19 @@ int memorymap_write(uint32_t address, uint8_t width, uint32_t value) {
        break;
      default:
        switch(width) {
+	 case 0xFFFFFFFF:
+	 case 0xF:
 	 case 4:
            if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
            if(!memorymap_aligned_write(address+1, 0x7, value>>8 ))  return 0;
 	   return 1;
+	 case 0xFFFF:
+	 case 3:
 	 case 2:
            if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
            if(!memorymap_aligned_write(address+1, 0x1, value>>8 ))  return 0;
 	   return 1;
+	 case 0xFF:
 	 case 1:
            if(!memorymap_aligned_write(address-3, 0x8, value<<24))  return 0;
 	   return 1;

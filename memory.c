@@ -21,7 +21,7 @@ struct fifo_fetch_data {
 uint32_t write_request_count;
 struct fifo_write_request {
   uint32_t address;
-  uint8_t  mask;
+  uint32_t  mask;
   uint32_t data;
 } write_request_fifo[FIFO_SIZE];
 
@@ -37,14 +37,18 @@ struct fifo_fetch_request {
   uint32_t address;
 } fetch_request_fifo[FIFO_SIZE];
 
-
-
 /****************************************************************************/
-int memory_initialise(void) {
+void memory_reset(void) {
   read_data_count = 0;
   fetch_data_count = 0;
   write_request_count = 0;
   read_request_count = 0;
+  display_log("Memory reset");
+}
+
+/****************************************************************************/
+int memory_initialise(void) {
+  memory_reset();
   return memorymap_initialise();
 }
 
@@ -115,7 +119,7 @@ int      memory_write_full(void) {
 }
 
 /****************************************************************************/
-int      memory_write_request(uint32_t address, uint8_t mask, uint32_t value) {
+int      memory_write_request(uint32_t address, uint32_t mask, uint32_t value) {
   if(write_request_count == FIFO_SIZE) {
     return 0;
   }
@@ -128,20 +132,8 @@ int      memory_write_request(uint32_t address, uint8_t mask, uint32_t value) {
 
 int  memory_run(void) {
   int rtn = 1;
-  while( write_request_count > 0) {
-    switch(write_request_fifo[0].mask) {
-      case 0x1:
-         rtn = memorymap_write(write_request_fifo[0].address, 1, write_request_fifo[0].data);
-	 break;
-      case 0x3:
-         rtn = memorymap_write(write_request_fifo[0].address, 2, write_request_fifo[0].data);
-	 break;
-      case 0xF:
-         rtn = memorymap_write(write_request_fifo[0].address, 4, write_request_fifo[0].data);
-	 break;
-      default:
-	 display_log("Unexpected write width");
-    }
+  if( write_request_count > 0) {
+    rtn = memorymap_write(write_request_fifo[0].address, write_request_fifo[0].mask, write_request_fifo[0].data);
     int i;
     /* Move the FIFO */
     for(i = 0; i < write_request_count-1; i++) {
@@ -150,11 +142,12 @@ int  memory_run(void) {
       write_request_fifo[i].data    = write_request_fifo[i+1].data;
     }
     write_request_count--;
+    return 1;
   }
 
 
   /* Process the read request queue */
-  while( read_request_count > 0 && read_data_count < FIFO_SIZE) {
+  if( read_request_count > 0 && read_data_count < FIFO_SIZE) {
     uint32_t data;
     int i;
     if(memorymap_read( read_request_fifo[0].address, 4, &data)) {
@@ -169,10 +162,11 @@ int  memory_run(void) {
       read_request_fifo[i].address = read_request_fifo[i+1].address;
     }
     read_request_count--;
+    return 1;
   }
 
   /* Process the fetch request queue */
-  while( fetch_request_count > 0 && fetch_data_count < FIFO_SIZE) {
+  if( fetch_request_count > 0 && fetch_data_count < FIFO_SIZE) {
     uint32_t data;
     int i;
     if(memorymap_read( fetch_request_fifo[0].address, 4, &data)) {
@@ -187,6 +181,7 @@ int  memory_run(void) {
       fetch_request_fifo[i].address = fetch_request_fifo[i+1].address;
     }
     fetch_request_count--;
+    return 1;
   }
   
 

@@ -54,7 +54,6 @@ int main(int argc, char *argv[]) {
   riscv_dump();
   riscv_finish();
   display_log("RISC-V shutdown");
-//  memorymap_dump();
   memory_finish();
   display_log("Memory shutdown");
   display_update();
