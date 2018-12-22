@@ -164,7 +164,7 @@ int      memory_write_request(uint32_t address, uint32_t mask, uint32_t value) {
 int  memory_run(void) {
   if( write_request_fifo.count > 0) {
     uint32_t addr, data;
-    uint8_t mask;
+    uint32_t mask;
 
     addr = write_request_fifo.address[write_request_fifo.read_ptr];
     mask = write_request_fifo.mask[write_request_fifo.read_ptr];
@@ -200,10 +200,10 @@ int  memory_run(void) {
   /* Process the fetch request queue */
   if( fetch_request_fifo.count > 0 && fetch_data_fifo.count < FIFO_SIZE) {
     uint32_t addr, data;
+
     addr = fetch_request_fifo.address[fetch_request_fifo.read_ptr];
     fetch_request_fifo.count--;
     fetch_request_fifo.read_ptr = (fetch_request_fifo.read_ptr == FIFO_SIZE-1) ? 0 : fetch_request_fifo.read_ptr+1;
-
 
     if(!memorymap_read( addr, 4, &data)) {
       data = 0;
