@@ -16,13 +16,21 @@
 #include "display.h"
 
 #define UART_DEBUG 0
+#define UART_FIFO_SIZE 8
 #define UART_QUEUE_DEPTH 8
 struct uart_data {
   uint16_t divisor; 
-  uint8_t tx_queue[UART_QUEUE_DEPTH];
-  uint8_t rx_queue[UART_QUEUE_DEPTH];
+
+  uint8_t tx_fifo[UART_FIFO_SIZE];
+  uint8_t tx_read_ptr;
+  uint8_t tx_write_ptr;
   uint8_t tx_count;
+
+  uint8_t rx_fifo[UART_FIFO_SIZE];
+  uint8_t rx_read_ptr;
+  uint8_t rx_write_ptr;
   uint8_t rx_count;
+
   uint8_t tx_watermark;
   uint8_t rx_watermark;
   uint8_t tx_enable;
@@ -73,9 +81,11 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 
    switch(address) {
      case 0x00: // TRANSMIT DATA REGISTER
-	 if(data->tx_count < UART_QUEUE_DEPTH) {
-	   data->tx_queue[data->tx_count] = value & 0xFF;
+	 if(data->tx_count < UART_FIFO_SIZE) {
+	   data->tx_fifo[data->tx_write_ptr] = value & 0xFF;
 	   data->tx_count++;
+           data->tx_write_ptr = (data->tx_write_ptr == UART_FIFO_SIZE-1) ? 0 : data->tx_write_ptr+1;
+
 	   if(data->debug) {
              sprintf(buffer,"UART data added to tx queue 0x%02x", value & 0xff);
              display_log(buffer);
@@ -134,11 +144,11 @@ int UART_set(struct region *r, uint32_t address, uint8_t mask, uint32_t value) {
 
    // SHould I flush the queue? 
    if(data->tx_enable) {
-     int i;
-     for(i = 0; i< data->tx_count; i++) {
-       display_uart_write(data->tx_queue[i] & 0xFF);
+     while(data->tx_count > 0) {
+       display_uart_write(data->tx_fifo[data->tx_read_ptr] & 0xFF);
+       data->tx_count--;
+       data->tx_read_ptr = (data->tx_read_ptr == UART_FIFO_SIZE-1) ? 0 : data->tx_read_ptr+1;
      }
-     data->tx_count = 0;
    }
    return 1;
 }
@@ -149,8 +159,9 @@ void UART_rx_enqueue(struct region *r, uint8_t c) {
   struct uart_data *data = r->data;
   if(data->rx_enable) {
     if(data->rx_count < UART_QUEUE_DEPTH) {
-      data->rx_queue[data->tx_count] = c;
+      data->rx_fifo[data->tx_write_ptr] = c;
       data->rx_count++;
+      data->tx_write_ptr = (data->tx_write_ptr == UART_FIFO_SIZE-1) ? 0 : data->tx_write_ptr+1;
       if(data->debug) {
         sprintf(buffer,"UART data added to rx queue 0x%02x", c);
         display_log(buffer);
@@ -197,13 +208,11 @@ int UART_get(struct region *r, uint32_t address, uint32_t *value) {
        break;
      case 0x04:
        if(data->rx_count > 0) {
+	 v = data->rx_fifo[data->rx_read_ptr];
+	 data->rx_count--;
+	 data->rx_read_ptr = (data->rx_read_ptr == UART_FIFO_SIZE-1) ? 0 : data->rx_read_ptr+1;
+
          if(data->debug) {
-	   int i;
-	   v = data->rx_queue[0];
-	   for(i = 1; i < data->rx_count; i++) {
-	     data->rx_queue[i-1] = data->rx_queue[i];
-	   }
-	   data->rx_count--;
            sprintf(buffer,"UART rx queue read - 0x%03x", v);
 	   display_log(buffer);
          }

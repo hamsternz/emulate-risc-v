@@ -176,8 +176,6 @@ int  memory_run(void) {
     return memorymap_write(addr, mask, data);
   }
 
-
-
   /* Process the read request queue */
   if( read_request_fifo.count > 0 && read_data_fifo.count < FIFO_SIZE) {
     uint32_t data, addr;
