@@ -433,8 +433,35 @@ static int op_unified(void) {
     if(memory_write_full()) {
       stalled = 1;
     } else {
+      uint32_t addr;
+      int unaligned = 0;
+      addr = regs[rs1]+imm12wr;
       stalled = 0;
-      if(!memory_write_request(regs[rs1]+imm12wr, op->memory_mask, regs[rs2])) {
+
+      switch(addr & 3) {
+        case 1:
+          if(op->memory_mask  == 0xFFFFFFFF) {
+            unaligned = 1;
+          }
+          break;
+        case 2:
+          if(op->memory_mask  == 0xFFFFFFFF) {
+            unaligned = 1;
+          }
+          break;
+        case 3:
+          if(op->memory_mask  != 0xFF) {
+            unaligned = 1;
+          }
+          break;
+      }
+      if(unaligned) {
+        char buffer[100];
+        sprintf(buffer,"Unaligned write at %08x %08x",addr, op->memory_mask);
+        display_log(buffer);
+      }
+
+      if(!memory_write_request(addr, op->memory_mask, regs[rs2])) {
         return 0;
       }
     }
@@ -444,7 +471,34 @@ static int op_unified(void) {
   if(op->memory_mode == MEM_LOAD) {
     if(rd != 0) {
       if(!read_dispatched) {
+        uint32_t addr;
+        int unaligned = 0;
+        addr = regs[rs1]+imm12;
         stalled = 1;
+
+        switch(addr & 3) {
+          case 1:
+            if(op->memory_mask  == 0xFFFFFFFF) {
+              unaligned = 1;
+            }
+            break;
+          case 2:
+            if(op->memory_mask  == 0xFFFFFFFF) {
+              unaligned = 1;
+            }
+            break;
+          case 3:
+            if(op->memory_mask  != 0xFF) {
+              unaligned = 1;
+            }
+            break;
+        }
+        if(unaligned) {
+          char buffer[100];
+          sprintf(buffer,"Unaligned read at %08x %08x",addr, op->memory_mask);
+          display_log(buffer);
+        }
+
         if(memory_read_request(regs[rs1]+imm12)) {
           read_dispatched = 1;
         } 
